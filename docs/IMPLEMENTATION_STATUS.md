@@ -17,16 +17,21 @@
 - Manual invoice usage-snapshot API
 - Initial unit tests and production build
 
-## Requires Supabase project credentials
+## Supabase activation completed
 
-These cannot be executed safely without a real development Supabase project:
+- Supabase project keys configured locally in the untracked `.env`
+- Database connection verified through the session-mode pooler
+- Foundation migration applied transactionally
+- Core tables verified through the server-only Data API
+- Shared Retell connection record created with secret references only
+- Two voice and two chat agents imported
+- All imported agents intentionally remain unassigned
+- Private `generated-reports` Storage bucket created
 
-- Apply the SQL migration
-- Generate database types from the deployed schema
+## Still requires client identity information
+
 - Create the first administrator
 - Run real RLS integration tests
-- Store the shared Retell connection row
-- Import the four currently visible Retell agents into Supabase
 - Assign agents to real client tenants
 - Register and test the production-shaped Retell webhook flow
 
@@ -40,4 +45,3 @@ These cannot be executed safely without a real development Supabase project:
 - Add client-specific KPI definitions
 - Approve transcript/recording retention per client
 - Perform security review and one-tenant pilot
-
