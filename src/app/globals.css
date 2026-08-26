@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #12221e;
+  --muted: #687a74;
+  --paper: #f4f6f2;
+  --card: rgba(255, 255, 255, 0.82);
+  --line: rgba(25, 59, 48, 0.12);
+  --brand: #164f3e;
+  --brand-bright: #1f7659;
+  --accent: #d7f55b;
+  --warning: #b96f1b;
+  --danger: #b33b3b;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 85% 0%, rgba(215, 245, 91, 0.20), transparent 28rem),
+    radial-gradient(circle at 12% 18%, rgba(61, 137, 111, 0.11), transparent 25rem),
+    var(--paper);
+  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+}
+
+button, input, select { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+
+.glass {
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 45px rgba(28, 64, 52, 0.07);
+  backdrop-filter: blur(18px);
+}
+
+.subtle-grid {
+  background-image:
+    linear-gradient(rgba(22, 79, 62, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(22, 79, 62, 0.035) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.enter { animation: enter 420ms ease both; }
+.enter-delay { animation: enter 520ms 80ms ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
