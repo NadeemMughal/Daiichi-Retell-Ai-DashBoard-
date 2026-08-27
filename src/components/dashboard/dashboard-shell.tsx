@@ -27,6 +27,7 @@ import {
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { cn } from "@/lib/cn";
 import { createClient } from "@/lib/supabase/client";
+import { RetellAgentsView, RetellAnalyticsView, RetellContactsView, RetellPhoneNumbersView, SessionHistoryView } from "./retell-views";
 
 const nav = [
   { label: "Home", slug: "overview", icon: LayoutDashboard },
@@ -68,9 +69,9 @@ export type DashboardDataset = {
   userName: string;
   metrics: typeof previewMetrics;
   chart: typeof previewChartData;
-  calls: Array<{ contact: string; number: string; agentId?: string; agent: string; outcome: string; duration: string; time: string; startedAt?: string; tone: string }>;
-  agents: Array<{ id: string; providerId?: string; name: string; kind: "voice" | "chat"; calls: number; chats: number; score: string; status: string }>;
-  chats: Array<{ id: string; agentId?: string; agent: string; outcome: string; messages: number; time: string; startedAt?: string; status: string }>;
+  calls: Array<{ contact: string; number: string; agentId?: string; agent: string; outcome: string; duration: string; time: string; startedAt?: string; tone: string; sessionId?: string; channel?: string; cost?: string; endReason?: string; sentiment?: string; status?: string }>;
+  agents: Array<{ id: string; providerId?: string; name: string; kind: "voice" | "chat"; calls: number; chats: number; score: string; status: string; modifiedAt?: string }>;
+  chats: Array<{ id: string; agentId?: string; agent: string; outcome: string; messages: number; time: string; startedAt?: string; status: string; sessionId?: string; cost?: string; sentiment?: string }>;
   team: Array<{ name: string; email: string; role: string; status: string }>;
   lastSyncedAt: string;
   allowedViews: string[];
@@ -227,8 +228,12 @@ function WorkspacePage({ active: selectedView, dashboard, query, rangeDays }: { 
   const chatAgents = dashboard.agents.filter((agent) => agent.kind === "chat" && agent.name.toLowerCase().includes(query.toLowerCase()));
   const calls = dashboard.calls.filter((call) => inRange(call.startedAt) && `${call.contact} ${call.agent} ${call.outcome}`.toLowerCase().includes(query.toLowerCase()));
   const chats = dashboard.chats.filter((chat) => inRange(chat.startedAt) && `${chat.agent} ${chat.outcome} ${chat.status}`.toLowerCase().includes(query.toLowerCase()));
-  if (selectedView === "Phone Numbers") return <section className="mt-8"><PhoneNumbersView phoneNumbers={dashboard.phoneNumbers ?? []} agents={dashboard.agents}/></section>;
-  if (selectedView === "Contacts") return <section className="mt-8"><ContactsView calls={calls}/></section>;
+  if (selectedView === "Agents") return <section className="mt-8"><RetellAgentsView agents={dashboard.agents}/></section>;
+  if (selectedView === "Phone Numbers") return <section className="mt-8"><RetellPhoneNumbersView phoneNumbers={dashboard.phoneNumbers ?? []} agents={dashboard.agents}/></section>;
+  if (selectedView === "Call History") return <section className="mt-8"><SessionHistoryView kind="call" calls={calls} chats={chats}/></section>;
+  if (selectedView === "Chat History") return <section className="mt-8"><SessionHistoryView kind="chat" calls={calls} chats={chats}/></section>;
+  if (selectedView === "Contacts") return <section className="mt-8"><RetellContactsView calls={calls}/></section>;
+  if (selectedView === "Analytics") return <section className="mt-8"><RetellAnalyticsView calls={calls} chats={chats} agents={dashboard.agents}/></section>;
   return <section className="mt-8">
     {active === "Voice agents" && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{voiceAgents.map((agent) => <article key={agent.id} className="glass rounded-2xl p-6"><div className="flex items-center gap-4"><div className="grid size-12 place-items-center rounded-2xl bg-[#164f3e] text-white"><Bot className="size-6" /></div><div className="min-w-0"><h2 className="truncate font-semibold">{agent.name}</h2><p className="text-xs capitalize text-[#71817c]">{agent.status} voice agent</p></div></div><div className="mt-6 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Calls</p><p className="mt-1 text-2xl font-semibold">{agent.calls}</p></div><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Completion</p><p className="mt-1 text-2xl font-semibold">{agent.score}</p></div></div></article>)}{!voiceAgents.length && <EmptyState>No assigned voice agents match this workspace.</EmptyState>}</div>}
     {active === "Calls" && <ConversationTable calls={calls} />}
@@ -236,17 +241,6 @@ function WorkspacePage({ active: selectedView, dashboard, query, rangeDays }: { 
     {active === "Reports" && <ReportsView dashboard={{ ...dashboard, calls, chats }} />}
     {active === "Team" && <div className="glass overflow-hidden rounded-2xl">{dashboard.team.length ? <div className="divide-y divide-[#173f3310]">{dashboard.team.map((member) => <div key={member.email} className="flex items-center gap-4 p-5"><div className="grid size-10 place-items-center rounded-full bg-[#d7f55b] text-sm font-bold text-[#123e32]">{member.name.slice(0, 2).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate font-semibold">{member.name}</p><p className="truncate text-xs text-[#71817c]">{member.email}</p></div><span className="text-sm capitalize text-[#596a64]">{member.role}</span><span className="rounded-full bg-[#e7f7ee] px-3 py-1 text-xs font-semibold capitalize text-[#1c674e]">{member.status}</span></div>)}</div> : <EmptyState>No active team memberships were found.</EmptyState>}</div>}
   </section>;
-}
-
-function PhoneNumbersView({ phoneNumbers, agents }: { phoneNumbers: NonNullable<DashboardDataset["phoneNumbers"]>; agents: DashboardDataset["agents"] }) {
-  if (!phoneNumbers.length) return <EmptyState>No Retell phone numbers are bound to your assigned agents.</EmptyState>;
-  return <div className="grid gap-4 md:grid-cols-2">{phoneNumbers.map((number) => { const boundIds = new Set([...number.inboundAgentIds, ...number.outboundAgentIds]); const bound = agents.filter((agent) => agent.providerId && boundIds.has(agent.providerId)); return <article key={number.number} className="glass rounded-2xl p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wider text-[#1f7659]">{number.nickname}</p><h2 className="mt-2 text-2xl font-semibold">{number.prettyNumber}</h2><p className="mt-1 text-xs capitalize text-[#71817c]">{number.type}</p></div><Phone className="size-6 text-[#1f7659]"/></div><div className="mt-5 space-y-2"><p className="text-xs font-semibold text-[#71817c]">Bound agents</p>{bound.map((agent) => <div key={agent.id} className="rounded-xl bg-white/70 p-3 text-sm font-semibold">{agent.name}</div>)}{!bound.length && <p className="text-sm text-[#84928d]">No visible agent binding.</p>}</div></article>; })}</div>;
-}
-
-function ContactsView({ calls }: { calls: DashboardDataset["calls"] }) {
-  const contacts = Array.from(new Map(calls.map((call) => [call.number, call])).values());
-  if (!contacts.length) return <EmptyState>No contacts have been synchronized for the selected period.</EmptyState>;
-  return <div className="glass overflow-hidden rounded-2xl"><div className="divide-y divide-[#173f3310]">{contacts.map((contact) => <div key={contact.number} className="grid gap-2 p-5 sm:grid-cols-[1fr_1fr_auto] sm:items-center"><div><p className="font-semibold">{contact.contact}</p><p className="text-xs text-[#71817c]">{contact.number}</p></div><p className="text-sm text-[#596a64]">Last handled by {contact.agent}</p><span className="rounded-full bg-[#e7f7ee] px-3 py-1 text-xs font-semibold text-[#1c674e]">Synchronized</span></div>)}</div></div>;
 }
 
 function ReportsView({ dashboard }: { dashboard: DashboardDataset }) {
