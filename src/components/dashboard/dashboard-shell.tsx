@@ -70,6 +70,7 @@ export type DashboardDataset = {
   chats: Array<{ id: string; agent: string; outcome: string; messages: number; time: string; status: string }>;
   team: Array<{ name: string; email: string; role: string; status: string }>;
   lastSyncedAt: string;
+  allowedViews: string[];
 };
 
 const metricIcons = [Phone, CalendarCheck, Clock3, Headphones] as const;
@@ -81,9 +82,11 @@ const previewAgents = [
 ];
 
 export function DashboardShell({ preview = false, data, initialView = "Overview" }: { preview?: boolean; data?: DashboardDataset; initialView?: string }) {
-  const dashboard = data ?? { tenantName: "Daiichi Automotive", userName: "Adeel", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString() };
+  const dashboard = data ?? { tenantName: "Daiichi Automotive", userName: "Adeel", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString(), allowedViews: nav.map((item) => item.label) };
   const router = useRouter();
-  const [active, setActive] = useState(initialView);
+  const visibleNav = nav.filter((item) => dashboard.allowedViews.includes(item.label));
+  const initialAllowedView = dashboard.allowedViews.includes(initialView) ? initialView : visibleNav[0]?.label ?? "Overview";
+  const [active, setActive] = useState(initialAllowedView);
   const [range, setRange] = useState("Last 7 days");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -123,7 +126,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
             </button>
           </div>
           <nav className="mt-7 space-y-1" aria-label="Primary navigation">
-            {nav.map((item) => preview ? <Link key={item.label} href={`/preview/${item.slug}`} onClick={() => setMobileOpen(false)} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</Link> : <button key={item.label} onClick={() => { setActive(item.label); setMobileOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</button>)}
+            {visibleNav.map((item) => preview ? <Link key={item.label} href={`/preview/${item.slug}`} onClick={() => setMobileOpen(false)} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</Link> : <button key={item.label} onClick={() => { setActive(item.label); setMobileOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</button>)}
           </nav>
           <div className="mt-auto space-y-1 border-t border-white/10 pt-4">
             <Link href="/admin" className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-white/65 hover:bg-white/8 hover:text-white"><Settings className="size-[18px]" />Back to operations</Link>

@@ -3,7 +3,7 @@ import { cache } from "react";
 import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { permissionsForPlatformRole, permissionsForTenantRole, type Permission, type PlatformRole, type TenantRole } from "./permissions";
+import { applicablePlatformRoles, permissionsForPlatformRole, permissionsForTenantRole, type Permission, type PlatformRole, type TenantRole } from "./permissions";
 
 export type AuthorizationContext = {
   userId: string;
@@ -28,7 +28,7 @@ export async function requireAuthorizationContext(tenantSlug?: string): Promise<
   if (!profile || profile.status !== "active") redirect("/login?reason=suspended");
 
   const { data: platformRows } = await admin.from("platform_role_assignments").select("role,scope_tenant_id").eq("user_id", user.id).is("revoked_at", null);
-  const platformRoles = (platformRows ?? []).map((row) => row.role as PlatformRole);
+  let platformRoles: PlatformRole[] = [];
   let tenantId: string | null = null;
   let tenantRole: TenantRole | null = null;
 
@@ -36,10 +36,12 @@ export async function requireAuthorizationContext(tenantSlug?: string): Promise<
     const { data: tenant } = await admin.from("tenants").select("id,status").eq("slug", tenantSlug).maybeSingle();
     if (!tenant || tenant.status === "archived") notFound();
     tenantId = tenant.id;
+    platformRoles = applicablePlatformRoles(platformRows ?? [], tenant.id);
     const { data: membership } = await admin.from("tenant_memberships").select("role,status").eq("tenant_id", tenant.id).eq("user_id", user.id).maybeSingle();
     if (membership?.status === "active") tenantRole = membership.role as TenantRole;
-    const platformApplies = (platformRows ?? []).some((row) => row.scope_tenant_id === null || row.scope_tenant_id === tenant.id);
-    if (!tenantRole && !platformApplies) notFound();
+    if (!tenantRole && !platformRoles.length) notFound();
+  } else {
+    platformRoles = applicablePlatformRoles(platformRows ?? []);
   }
 
   const granted = new Set<Permission>();
@@ -51,4 +53,3 @@ export async function requireAuthorizationContext(tenantSlug?: string): Promise<
 export function requirePermission(context: AuthorizationContext, permission: Permission) {
   if (!context.permissions.has(permission)) notFound();
 }
-

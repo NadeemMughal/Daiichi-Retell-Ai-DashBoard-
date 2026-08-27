@@ -36,10 +36,10 @@ const platformRolePermissions: Record<PlatformRole, readonly Permission[]> = {
 };
 
 const tenantRolePermissions: Record<TenantRole, readonly Permission[]> = {
-  owner: ["tenants.read", "members.read", "members.manage", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "reports.export", "billing.read"],
-  admin: ["tenants.read", "members.read", "members.manage", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "reports.export", "billing.read"],
-  manager: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "reports.export"],
-  analyst: ["tenants.read", "agents.read", "calls.read", "chats.read", "analytics.read", "reports.export"],
+  owner: ["tenants.read", "members.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "billing.read"],
+  admin: ["tenants.read", "members.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "billing.read"],
+  manager: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read"],
+  analyst: ["tenants.read", "agents.read", "calls.read", "chats.read", "analytics.read"],
   billing: ["tenants.read", "billing.read"],
   viewer: ["tenants.read", "agents.read", "analytics.read"]
 };
@@ -52,3 +52,11 @@ export function permissionsForTenantRole(role: TenantRole) {
   return tenantRolePermissions[role];
 }
 
+export function applicablePlatformRoles(
+  assignments: ReadonlyArray<{ role: string; scope_tenant_id: string | null }>,
+  tenantId?: string
+) {
+  return assignments
+    .filter((assignment) => tenantId === undefined ? assignment.scope_tenant_id === null : assignment.scope_tenant_id === null || assignment.scope_tenant_id === tenantId)
+    .map((assignment) => assignment.role as PlatformRole);
+}

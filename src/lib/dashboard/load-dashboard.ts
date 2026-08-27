@@ -1,4 +1,5 @@
 import "server-only";
+import { notFound } from "next/navigation";
 import type { DashboardDataset } from "@/components/dashboard/dashboard-shell";
 import { requireAuthorizationContext, requirePermission } from "@/lib/auth/context";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -7,7 +8,7 @@ function dayKey(date: Date) { return date.toISOString().slice(0, 10); }
 
 export async function loadDashboard(tenantSlug: string): Promise<DashboardDataset> {
   const context = await requireAuthorizationContext(tenantSlug);
-  requirePermission(context, "analytics.read");
+  requirePermission(context, "tenants.read");
   if (!context.tenantId) throw new Error("Tenant context is required.");
   const admin = createAdminClient();
   const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 6); periodStart.setUTCHours(0, 0, 0, 0);
@@ -42,6 +43,15 @@ export async function loadDashboard(tenantSlug: string): Promise<DashboardDatase
     const volume = kind === "chat" ? chatCount : callCount;
     return { id: relation?.id ?? assignment.agent_id, name: relation?.display_name ?? "Assigned agent", kind, calls: callCount, chats: chatCount, score: volume ? `${Math.round(completed / volume * 100)}%` : "—", status: relation?.status ?? "inactive" };
   });
+  const allowedViews = [
+    context.permissions.has("analytics.read") && "Overview",
+    context.permissions.has("agents.read") && "Voice agents",
+    context.permissions.has("calls.read") && "Calls",
+    context.permissions.has("chats.read") && "Chat",
+    context.permissions.has("analytics.read") && "Reports",
+    context.permissions.has("members.read") && "Team"
+  ].filter((view): view is string => Boolean(view));
+  if (!allowedViews.length) notFound();
   return {
     tenantName: tenant?.display_name ?? "Client workspace",
     userName: profile?.display_name?.split(" ")[0] ?? profile?.email?.split("@")[0] ?? "there",
@@ -50,10 +60,12 @@ export async function loadDashboard(tenantSlug: string): Promise<DashboardDatase
       { label: "Successful outcomes", value: String(successful), change: callRows.length ? `${Math.round(successful / callRows.length * 100)}%` : "0%", detail: "of conversations", positive: true },
       { label: "Avg. duration", value: `${Math.floor(avgSeconds / 60)}m ${avgSeconds % 60}s`, change: "Live", detail: "completed calls", positive: true },
       { label: "Active agents", value: String(agentRows.filter((agent) => agent.status === "active").length), change: "Assigned", detail: "to this workspace", positive: true }
-    ], chart, agents: agentRows,
-    calls: callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning" })),
-    chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Assigned agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", status: chat.status })),
-    team: (memberships ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }),
-    lastSyncedAt: new Date().toISOString()
+    ], chart,
+    agents: context.permissions.has("agents.read") ? agentRows : [],
+    calls: context.permissions.has("calls.read") ? callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning" })) : [],
+    chats: context.permissions.has("chats.read") ? chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Assigned agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", status: chat.status })) : [],
+    team: context.permissions.has("members.read") ? (memberships ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }) : [],
+    lastSyncedAt: new Date().toISOString(),
+    allowedViews
   };
 }
