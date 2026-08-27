@@ -1,6 +1,5 @@
-import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { redirect } from "next/navigation";
 
 export default function PreviewPage() {
-  return <DashboardShell preview />;
+  redirect("/preview/overview");
 }
-

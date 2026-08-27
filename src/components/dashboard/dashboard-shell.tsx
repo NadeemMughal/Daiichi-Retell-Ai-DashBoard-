@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Activity,
   ArrowDownRight,
@@ -27,12 +28,12 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { cn } from "@/lib/cn";
 
 const nav = [
-  { label: "Overview", icon: LayoutDashboard },
-  { label: "Voice agents", icon: Bot },
-  { label: "Calls", icon: Phone },
-  { label: "Chat", icon: MessageSquareText },
-  { label: "Reports", icon: FileText },
-  { label: "Team", icon: Users }
+  { label: "Overview", slug: "overview", icon: LayoutDashboard },
+  { label: "Voice agents", slug: "voice-agents", icon: Bot },
+  { label: "Calls", slug: "calls", icon: Phone },
+  { label: "Chat", slug: "chat", icon: MessageSquareText },
+  { label: "Reports", slug: "reports", icon: FileText },
+  { label: "Team", slug: "team", icon: Users }
 ];
 
 const previewChartData = [
@@ -79,10 +80,10 @@ const previewAgents = [
   { id: "preview-3", name: "Support chat", kind: "chat" as const, calls: 0, chats: 151, score: "89%", status: "active" }
 ];
 
-export function DashboardShell({ preview = false, data }: { preview?: boolean; data?: DashboardDataset }) {
+export function DashboardShell({ preview = false, data, initialView = "Overview" }: { preview?: boolean; data?: DashboardDataset; initialView?: string }) {
   const dashboard = data ?? { tenantName: "Daiichi Automotive", userName: "Adeel", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString() };
   const router = useRouter();
-  const [active, setActive] = useState("Overview");
+  const [active, setActive] = useState(initialView);
   const [range, setRange] = useState("Last 7 days");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -108,10 +109,10 @@ export function DashboardShell({ preview = false, data }: { preview?: boolean; d
       <aside className={cn("fixed inset-y-0 left-0 z-40 w-[280px] border-r border-white/10 bg-[#123e32] text-white transition-transform lg:sticky lg:top-0 lg:w-auto lg:translate-x-0", preview && "pt-8", mobileOpen ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex h-full flex-col p-5">
           <div className="flex items-center justify-between px-2 py-3">
-            <div className="flex items-center gap-3">
+            <Link href={preview ? "/admin" : "/"} className="flex items-center gap-3 rounded-xl transition hover:opacity-85" aria-label="Return to Daiichi home">
               <div className="grid size-10 place-items-center rounded-xl bg-[#d7f55b] font-black text-[#123e32]">D</div>
               <div><p className="text-[10px] uppercase tracking-[.25em] text-white/55">Daiichi</p><p className="font-semibold">Agent Intelligence</p></div>
-            </div>
+            </Link>
             <button aria-label="Close menu" onClick={() => setMobileOpen(false)} className="rounded-lg p-2 hover:bg-white/10 lg:hidden"><X className="size-5" /></button>
           </div>
           <div className="mt-7 rounded-2xl border border-white/10 bg-white/7 p-3">
@@ -122,14 +123,10 @@ export function DashboardShell({ preview = false, data }: { preview?: boolean; d
             </button>
           </div>
           <nav className="mt-7 space-y-1" aria-label="Primary navigation">
-            {nav.map((item) => (
-              <button key={item.label} onClick={() => { setActive(item.label); setMobileOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}>
-                <item.icon className="size-[18px]" />{item.label}
-              </button>
-            ))}
+            {nav.map((item) => preview ? <Link key={item.label} href={`/preview/${item.slug}`} onClick={() => setMobileOpen(false)} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</Link> : <button key={item.label} onClick={() => { setActive(item.label); setMobileOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</button>)}
           </nav>
           <div className="mt-auto space-y-1 border-t border-white/10 pt-4">
-            <button className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-white/65 hover:bg-white/8 hover:text-white"><Settings className="size-[18px]" />Account settings</button>
+            <Link href="/admin" className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-white/65 hover:bg-white/8 hover:text-white"><Settings className="size-[18px]" />Back to operations</Link>
             <div className="mt-3 flex items-center gap-3 rounded-xl px-3 py-3">
               <div className="grid size-9 place-items-center rounded-full bg-[#d7f55b] text-xs font-black text-[#123e32]">{dashboard.userName.slice(0, 2).toUpperCase()}</div>
               <div><p className="text-sm font-medium">{dashboard.userName}</p><p className="text-xs text-white/45">Workspace user</p></div>
