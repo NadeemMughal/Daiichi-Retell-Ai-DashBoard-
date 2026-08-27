@@ -25,9 +25,10 @@ import {
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { cn } from "@/lib/cn";
 import { createClient } from "@/lib/supabase/client";
-import { RetellAgentsView, RetellContactsView, RetellPhoneNumbersView, SessionHistoryView } from "./retell-views";
+import { RetellAgentsView, RetellContactsView, RetellPhoneNumbersView } from "./retell-views";
 import { DateRangePicker, type DateRangeValue } from "./date-range-picker";
 import { AnalyticsDashboard } from "./analytics-dashboard";
+import { SessionHistoryView } from "./session-history-view";
 
 const nav = [
   { label: "Home", slug: "overview", icon: LayoutDashboard },
@@ -182,7 +183,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
         </header>
 
         <div className="mx-auto max-w-[1500px] p-5 md:p-8 xl:p-10">
-          <section className="enter relative z-40 flex flex-col justify-between gap-5 md:flex-row md:items-end">
+          <section className="relative z-[80] flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div><p className="mb-2 text-xs font-bold uppercase tracking-[.18em] text-[#1f7659]">Performance command center</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{active === "Home" ? `Welcome, ${dashboard.userName}.` : active}</h1><p className="mt-2 text-sm text-[#687a74]">Live, tenant-isolated Retell reporting for {dashboard.tenantName}.</p></div>
             {["Call History", "Chat History", "Analytics"].includes(active) && <DateRangePicker value={dateRange} onChange={setDateRange} minimum={reportingMinimum}/>}
           </section>
