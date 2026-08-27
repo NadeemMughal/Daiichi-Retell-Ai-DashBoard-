@@ -11,7 +11,13 @@ export function createRetellClient() {
 
 export async function listRetellAgents() {
   const client = createRetellClient();
-  const [voice, chat] = await Promise.all([client.agent.list(), client.chatAgent.list()]);
+  const channelFilter = (value: "voice" | "chat") => ({
+    filter_criteria: { channel: { type: "string" as const, op: "eq" as const, value } }
+  });
+  const [voice, chat] = await Promise.all([
+    client.agent.list(channelFilter("voice")),
+    client.chatAgent.list(channelFilter("chat"))
+  ]);
   return {
     voice: (voice.items ?? []).map((agent) => ({ providerAgentId: agent.agent_id, displayName: agent.agent_name || "Unnamed voice agent", modifiedAt: agent.user_modified_timestamp })),
     chat: (chat.items ?? []).map((agent) => ({ providerAgentId: agent.agent_id, displayName: agent.agent_name || "Unnamed chat agent", modifiedAt: agent.user_modified_timestamp }))

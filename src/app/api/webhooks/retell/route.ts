@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { verify } from "retell-sdk";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { processRetellWebhookEvent } from "@/lib/retell/process-webhook";
 
 export const runtime = "nodejs";
 
@@ -41,7 +43,7 @@ export async function POST(request: Request) {
   const { data: connection } = await admin.from("retell_connections").select("id").eq("status", "active").limit(1).maybeSingle();
   if (!connection) return NextResponse.json({ error: "NO_ACTIVE_RETELL_CONNECTION" }, { status: 503 });
   const objectId = parsed.data.call?.call_id ?? parsed.data.chat?.chat_id ?? null;
-  const { error } = await admin.from("webhook_events").insert({
+  const { data: inboxEvent, error } = await admin.from("webhook_events").insert({
     connection_id: connection.id,
     provider: "retell",
     deduplication_key: deduplicationKey(parsed.data),
@@ -50,7 +52,16 @@ export async function POST(request: Request) {
     signature_verified_at: new Date().toISOString(),
     payload_sha256: createHash("sha256").update(rawBody).digest("hex"),
     status: "pending"
-  });
+  }).select("id,event_type,provider_object_id").maybeSingle();
   if (error && error.code !== "23505") return NextResponse.json({ error: "INBOX_UNAVAILABLE" }, { status: 503 });
+  if (inboxEvent) {
+    after(async () => {
+      try {
+        await processRetellWebhookEvent(inboxEvent.id, inboxEvent.event_type, inboxEvent.provider_object_id);
+      } catch {
+        // The authenticated Supabase cron retries failed events as a durable fallback.
+      }
+    });
+  }
   return new NextResponse(null, { status: 204 });
 }

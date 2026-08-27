@@ -27,7 +27,21 @@ export async function POST() {
     const { error } = await admin.from("retell_agents").upsert(normalized, { onConflict: "connection_id,provider_agent_id,kind" });
     if (error) return NextResponse.json({ error: "AGENT_IMPORT_FAILED" }, { status: 503 });
   }
+  for (const [kind, current] of [["voice", agents.voice], ["chat", agents.chat]] as const) {
+    let stale = admin.from("retell_agents").update({ status: "inactive", updated_at: new Date().toISOString() }).eq("connection_id", connection.id).eq("kind", kind);
+    if (current.length) stale = stale.not("provider_agent_id", "in", `(${current.map((agent) => `"${agent.providerAgentId}"`).join(",")})`);
+    const { error } = await stale;
+    if (error) return NextResponse.json({ error: "AGENT_RETIRE_FAILED" }, { status: 503 });
+  }
+  for (const [kind, current] of [["voice", agents.voice], ["chat", agents.chat]] as const) {
+    if (!current.length) continue;
+    const { error } = await admin.from("retell_agents").update({ status: "active", updated_at: new Date().toISOString() })
+      .eq("connection_id", connection.id)
+      .eq("kind", kind)
+      .in("provider_agent_id", current.map((agent) => agent.providerAgentId));
+    if (error) return NextResponse.json({ error: "AGENT_ACTIVATE_FAILED" }, { status: 503 });
+  }
+  await admin.from("retell_connections").update({ last_sync_at: new Date().toISOString(), status: "active" }).eq("id", connection.id);
   await admin.from("audit_logs").insert({ actor_user_id: context.userId, action: "retell.agents.imported", target_type: "retell_connection", target_id: connection.id, safe_metadata: { voiceCount: agents.voice.length, chatCount: agents.chat.length } });
   return NextResponse.json({ ok: true, voiceCount: agents.voice.length, chatCount: agents.chat.length });
 }
-

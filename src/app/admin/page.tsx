@@ -11,7 +11,7 @@ export default async function AdminPage() {
   const admin = createAdminClient();
   const [{ count: tenantCount }, { data: agents }, { count: pendingEvents }, { count: invoiceCount }] = await Promise.all([
     admin.from("tenants").select("id", { count: "exact", head: true }).neq("status", "archived"),
-    admin.from("retell_agents").select("id,display_name,kind,agent_assignments(id,tenant_id,tenants(display_name))").order("display_name"),
+    admin.from("retell_agents").select("id,display_name,kind,agent_assignments(id,tenant_id,tenants(display_name))").eq("status", "active").order("display_name"),
     admin.from("webhook_events").select("id", { count: "exact", head: true }).in("status", ["pending", "failed", "dead_letter"]),
     admin.from("manual_invoices").select("id", { count: "exact", head: true }).neq("status", "paid")
   ]);
