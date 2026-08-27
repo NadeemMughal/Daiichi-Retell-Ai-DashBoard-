@@ -25,8 +25,9 @@ import {
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { cn } from "@/lib/cn";
 import { createClient } from "@/lib/supabase/client";
-import { RetellAgentsView, RetellAnalyticsView, RetellContactsView, RetellPhoneNumbersView, SessionHistoryView } from "./retell-views";
+import { RetellAgentsView, RetellContactsView, RetellPhoneNumbersView, SessionHistoryView } from "./retell-views";
 import { DateRangePicker, type DateRangeValue } from "./date-range-picker";
+import { AnalyticsDashboard } from "./analytics-dashboard";
 
 const nav = [
   { label: "Home", slug: "overview", icon: LayoutDashboard },
@@ -181,7 +182,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
         </header>
 
         <div className="mx-auto max-w-[1500px] p-5 md:p-8 xl:p-10">
-          <section className="enter flex flex-col justify-between gap-5 md:flex-row md:items-end">
+          <section className="enter relative z-40 flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div><p className="mb-2 text-xs font-bold uppercase tracking-[.18em] text-[#1f7659]">Performance command center</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{active === "Home" ? `Welcome, ${dashboard.userName}.` : active}</h1><p className="mt-2 text-sm text-[#687a74]">Live, tenant-isolated Retell reporting for {dashboard.tenantName}.</p></div>
             {["Call History", "Chat History", "Analytics"].includes(active) && <DateRangePicker value={dateRange} onChange={setDateRange} minimum={reportingMinimum}/>}
           </section>
@@ -247,7 +248,7 @@ function WorkspacePage({ active: selectedView, dashboard, query, dateRange }: { 
   if (selectedView === "Call History") return <section className="mt-8"><SessionHistoryView kind="call" calls={calls} chats={chats}/></section>;
   if (selectedView === "Chat History") return <section className="mt-8"><SessionHistoryView kind="chat" calls={calls} chats={chats}/></section>;
   if (selectedView === "Contacts") return <section className="mt-8"><RetellContactsView calls={calls}/></section>;
-  if (selectedView === "Analytics") return <section className="mt-8"><RetellAnalyticsView calls={calls} chats={chats} agents={dashboard.agents}/></section>;
+  if (selectedView === "Analytics") return <section className="mt-8"><AnalyticsDashboard calls={calls} chats={chats} agents={dashboard.agents}/></section>;
   return <section className="mt-8">
     {active === "Voice agents" && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{voiceAgents.map((agent) => <article key={agent.id} className="glass rounded-2xl p-6"><div className="flex items-center gap-4"><div className="grid size-12 place-items-center rounded-2xl bg-[#164f3e] text-white"><Bot className="size-6" /></div><div className="min-w-0"><h2 className="truncate font-semibold">{agent.name}</h2><p className="text-xs capitalize text-[#71817c]">{agent.status} voice agent</p></div></div><div className="mt-6 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Calls</p><p className="mt-1 text-2xl font-semibold">{agent.calls}</p></div><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Completion</p><p className="mt-1 text-2xl font-semibold">{agent.score}</p></div></div></article>)}{!voiceAgents.length && <EmptyState>No assigned voice agents match this workspace.</EmptyState>}</div>}
     {active === "Calls" && <ConversationTable calls={calls} />}
