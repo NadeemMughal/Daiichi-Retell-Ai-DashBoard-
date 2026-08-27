@@ -7,7 +7,9 @@ export const permissions = [
   "agents.read",
   "agents.manage",
   "calls.read",
+  "calls.initiate",
   "chats.read",
+  "chats.respond",
   "transcripts.read",
   "recordings.play",
   "recordings.download",
@@ -41,7 +43,7 @@ const tenantRolePermissions: Record<TenantRole, readonly Permission[]> = {
   manager: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read"],
   analyst: ["tenants.read", "agents.read", "calls.read", "chats.read", "analytics.read"],
   billing: ["tenants.read", "billing.read"],
-  viewer: ["tenants.read", "agents.read", "analytics.read"]
+  viewer: ["tenants.read", "agents.read", "calls.read", "calls.initiate", "chats.read", "chats.respond", "analytics.read"]
 };
 
 export function permissionsForPlatformRole(role: PlatformRole) {

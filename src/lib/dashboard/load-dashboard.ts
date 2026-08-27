@@ -2,13 +2,14 @@ import "server-only";
 import { notFound } from "next/navigation";
 import type { DashboardDataset } from "@/components/dashboard/dashboard-shell";
 import { requireAuthorizationContext, requirePermission } from "@/lib/auth/context";
+import { permissionsForTenantRole, type Permission, type TenantRole } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 function dayKey(date: Date) { return date.toISOString().slice(0, 10); }
 
 export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const context = await requireAuthorizationContext();
-  requirePermission(context, "platform.manage");
+  requirePermission(context, "agents.read");
   const admin = createAdminClient();
   const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 6); periodStart.setUTCHours(0, 0, 0, 0);
   const [profileResult, agentsResult, callsResult, chatsResult, membershipsResult] = await Promise.all([
@@ -56,15 +57,24 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   };
 }
 
-export async function loadDashboard(tenantSlug: string): Promise<DashboardDataset> {
+export async function loadDashboard(tenantSlug: string, effectiveUserId?: string): Promise<DashboardDataset> {
   const context = await requireAuthorizationContext(tenantSlug);
   requirePermission(context, "tenants.read");
   if (!context.tenantId) throw new Error("Tenant context is required.");
   const admin = createAdminClient();
+  let dashboardUserId = context.userId;
+  let dashboardPermissions = context.permissions;
+  if (effectiveUserId && effectiveUserId !== context.userId) {
+    requirePermission(context, "members.manage");
+    const { data: targetMembership } = await admin.from("tenant_memberships").select("role").eq("tenant_id", context.tenantId).eq("user_id", effectiveUserId).eq("status", "active").maybeSingle();
+    if (!targetMembership) notFound();
+    dashboardUserId = effectiveUserId;
+    dashboardPermissions = new Set<Permission>(permissionsForTenantRole(targetMembership.role as TenantRole));
+  }
   const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 6); periodStart.setUTCHours(0, 0, 0, 0);
   const [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult] = await Promise.all([
     admin.from("tenants").select("display_name").eq("id", context.tenantId).single(),
-    admin.from("profiles").select("display_name,email").eq("id", context.userId).single(),
+    admin.from("profiles").select("display_name,email").eq("id", dashboardUserId).single(),
     admin.from("calls").select("id,agent_id,status,started_at,duration_ms,outcome,contact_masked").eq("tenant_id", context.tenantId).gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
     admin.from("chats").select("id,agent_id,status,started_at,ai_message_count,outcome").eq("tenant_id", context.tenantId).gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
     admin.from("agent_assignments").select("agent_id,retell_agents(id,display_name,kind,status)").eq("tenant_id", context.tenantId).is("valid_to", null),
@@ -79,9 +89,10 @@ export async function loadDashboard(tenantSlug: string): Promise<DashboardDatase
   const assignments = assignmentsResult.data;
   const memberships = membershipsResult.data;
   const tenantAgentIds = (assignments ?? []).map((assignment) => assignment.agent_id);
-  const accessResult = context.platformRoles.length ? null : await admin.from("user_agent_access").select("agent_id").eq("tenant_id", context.tenantId).eq("user_id", context.userId).is("revoked_at", null);
+  const viewingAnotherUser = dashboardUserId !== context.userId;
+  const accessResult = context.platformRoles.length && !viewingAnotherUser ? null : await admin.from("user_agent_access").select("agent_id").eq("tenant_id", context.tenantId).eq("user_id", dashboardUserId).is("revoked_at", null);
   if (accessResult?.error) throw new Error(`Dashboard access unavailable: ${accessResult.error.code}`);
-  const allowedAgentIds = new Set(context.platformRoles.length ? tenantAgentIds : (accessResult?.data ?? []).map((grant) => grant.agent_id));
+  const allowedAgentIds = new Set(context.platformRoles.length && !viewingAnotherUser ? tenantAgentIds : (accessResult?.data ?? []).map((grant) => grant.agent_id));
   const callRows = (calls ?? []).filter((call) => allowedAgentIds.has(call.agent_id));
   const chatRows = (chats ?? []).filter((chat) => allowedAgentIds.has(chat.agent_id));
   const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(periodStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
@@ -99,12 +110,12 @@ export async function loadDashboard(tenantSlug: string): Promise<DashboardDatase
     return { id: relation?.id ?? assignment.agent_id, name: relation?.display_name ?? "Assigned agent", kind, calls: callCount, chats: chatCount, score: volume ? `${Math.round(completed / volume * 100)}%` : "—", status: relation?.status ?? "inactive" };
   });
   const allowedViews = [
-    context.permissions.has("analytics.read") && "Overview",
-    context.permissions.has("agents.read") && "Voice agents",
-    context.permissions.has("calls.read") && "Calls",
-    context.permissions.has("chats.read") && "Chat",
-    context.permissions.has("analytics.read") && "Reports",
-    context.permissions.has("members.read") && "Team"
+    dashboardPermissions.has("analytics.read") && "Overview",
+    dashboardPermissions.has("agents.read") && "Voice agents",
+    dashboardPermissions.has("calls.read") && "Calls",
+    dashboardPermissions.has("chats.read") && "Chat",
+    dashboardPermissions.has("analytics.read") && "Reports",
+    dashboardPermissions.has("members.read") && "Team"
   ].filter((view): view is string => Boolean(view));
   if (!allowedViews.length) notFound();
   return {
