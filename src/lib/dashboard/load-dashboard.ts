@@ -28,13 +28,18 @@ export async function loadDashboard(tenantSlug: string): Promise<DashboardDatase
   const chats = chatsResult.data;
   const assignments = assignmentsResult.data;
   const memberships = membershipsResult.data;
-  const callRows = calls ?? []; const chatRows = chats ?? [];
+  const tenantAgentIds = (assignments ?? []).map((assignment) => assignment.agent_id);
+  const accessResult = context.platformRoles.length ? null : await admin.from("user_agent_access").select("agent_id").eq("tenant_id", context.tenantId).eq("user_id", context.userId).is("revoked_at", null);
+  if (accessResult?.error) throw new Error(`Dashboard access unavailable: ${accessResult.error.code}`);
+  const allowedAgentIds = new Set(context.platformRoles.length ? tenantAgentIds : (accessResult?.data ?? []).map((grant) => grant.agent_id));
+  const callRows = (calls ?? []).filter((call) => allowedAgentIds.has(call.agent_id));
+  const chatRows = (chats ?? []).filter((chat) => allowedAgentIds.has(chat.agent_id));
   const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(periodStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
   const chart = days.map((date) => { const sameDay = callRows.filter((call) => call.started_at && dayKey(new Date(call.started_at)) === dayKey(date)); return { day: date.toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }), calls: sameDay.length, converted: sameDay.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length }; });
   const totalSeconds = Math.round(callRows.reduce((sum, call) => sum + Number(call.duration_ms ?? 0), 0) / 1000);
   const successful = callRows.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length;
   const avgSeconds = callRows.length ? Math.round(totalSeconds / callRows.length) : 0;
-  const agentRows = (assignments ?? []).map((assignment) => {
+  const agentRows = (assignments ?? []).filter((assignment) => allowedAgentIds.has(assignment.agent_id)).map((assignment) => {
     const relation = Array.isArray(assignment.retell_agents) ? assignment.retell_agents[0] : assignment.retell_agents;
     const callCount = callRows.filter((call) => call.agent_id === assignment.agent_id).length;
     const chatCount = chatRows.filter((chat) => chat.agent_id === assignment.agent_id).length;

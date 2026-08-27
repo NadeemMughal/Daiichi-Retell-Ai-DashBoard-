@@ -36,8 +36,8 @@ const platformRolePermissions: Record<PlatformRole, readonly Permission[]> = {
 };
 
 const tenantRolePermissions: Record<TenantRole, readonly Permission[]> = {
-  owner: ["tenants.read", "members.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "billing.read"],
-  admin: ["tenants.read", "members.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "billing.read"],
+  owner: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "billing.read"],
+  admin: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "billing.read"],
   manager: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read"],
   analyst: ["tenants.read", "agents.read", "calls.read", "chats.read", "analytics.read"],
   billing: ["tenants.read", "billing.read"],

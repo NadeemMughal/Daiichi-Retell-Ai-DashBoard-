@@ -82,7 +82,7 @@ const previewAgents = [
 ];
 
 export function DashboardShell({ preview = false, data, initialView = "Overview" }: { preview?: boolean; data?: DashboardDataset; initialView?: string }) {
-  const dashboard = data ?? { tenantName: "Daiichi Automotive", userName: "Adeel", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString(), allowedViews: nav.map((item) => item.label) };
+  const dashboard = data ?? { tenantName: "Daiichi Automotive", userName: "Nadeem", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString(), allowedViews: nav.map((item) => item.label) };
   const router = useRouter();
   const visibleNav = nav.filter((item) => dashboard.allowedViews.includes(item.label));
   const initialAllowedView = dashboard.allowedViews.includes(initialView) ? initialView : visibleNav[0]?.label ?? "Overview";

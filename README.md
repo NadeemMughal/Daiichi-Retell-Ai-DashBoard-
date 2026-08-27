@@ -9,6 +9,7 @@ A secure multi-tenant reporting portal for Daiichi-managed Retell AI agents. Cli
 - Supabase PostgreSQL schema, grants, and tenant RLS
 - Separate Daiichi platform roles and client tenant roles
 - Shared Retell workspace with one-active-tenant-per-agent assignments
+- Daiichi-owner-controlled, per-user read-only agent access grants
 - Server-only Retell SDK adapter and read-only connectivity check
 - Signed Retell webhook verification and idempotent inbox
 - Scheduled webhook processing with assignment quarantine
@@ -22,7 +23,7 @@ A secure multi-tenant reporting portal for Daiichi-managed Retell AI agents. Cli
 
 The browser never calls Retell. An authenticated Supabase user is resolved to a Daiichi platform role and/or tenant membership. Every provider-data query is executed server-side with an explicit tenant constraint. Supabase's server secret bypasses RLS and is never browser-accessible.
 
-An agent must have exactly one active tenant assignment before provider events are normalized. Unassigned agents are quarantined.
+An agent must have exactly one active tenant assignment before provider events are normalized. Unassigned agents are quarantined. Tenant membership alone does not expose agent data: a client user must also have an active `user_agent_access` grant for each visible agent. Daiichi global platform roles can view and manage the full system; tenant users receive no browser or API write permissions.
 
 ## Local setup
 
@@ -88,4 +89,3 @@ npm run build
 6. Pilot one tenant before adding additional clients.
 
 See [architecture](docs/ARCHITECTURE.md) for the trust boundary and shared-workspace decision.
-

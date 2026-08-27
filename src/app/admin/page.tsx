@@ -3,6 +3,7 @@ import { Activity, Bot, Building2, ChevronRight, CircleAlert, Eye, FileText, Lay
 import { requireAuthorizationContext, requirePermission } from "@/lib/auth/context";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ImportButton } from "./import-button";
+import { AgentAccessManager } from "./agent-access-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +20,13 @@ export default async function AdminPage() {
   const context = await requireAuthorizationContext();
   requirePermission(context, "tenants.read");
   const admin = createAdminClient();
-  const [{ data: tenants }, { data: agents }, { count: pendingEvents }, { count: invoiceCount }] = await Promise.all([
+  const [{ data: tenants }, { data: agents }, { count: pendingEvents }, { count: invoiceCount }, { data: memberships }, { data: accessGrants }] = await Promise.all([
     admin.from("tenants").select("id,slug,display_name,status").neq("status", "archived").order("display_name"),
-    admin.from("retell_agents").select("id,display_name,kind,agent_assignments(id,tenant_id,tenants(display_name))").eq("status", "active").order("display_name"),
+    admin.from("retell_agents").select("id,display_name,kind,agent_assignments(id,tenant_id,valid_to,tenants(display_name))").eq("status", "active").order("display_name"),
     admin.from("webhook_events").select("id", { count: "exact", head: true }).in("status", ["pending", "failed", "dead_letter"]),
-    admin.from("manual_invoices").select("id", { count: "exact", head: true }).neq("status", "paid")
+    admin.from("manual_invoices").select("id", { count: "exact", head: true }).neq("status", "paid"),
+    admin.from("tenant_memberships").select("user_id,tenant_id,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email),tenants(display_name)").eq("status", "active"),
+    admin.from("user_agent_access").select("user_id,agent_id").is("revoked_at", null)
   ]);
   const unassigned = (agents ?? []).filter((agent) => !agent.agent_assignments?.length);
   const cards = [
@@ -32,6 +35,12 @@ export default async function AdminPage() {
     { label: "Unassigned agents", value: unassigned.length, icon: CircleAlert, tone: "bg-amber-50 text-amber-700" },
     { label: "Webhook exceptions", value: pendingEvents ?? 0, icon: Webhook, tone: "bg-rose-50 text-rose-700" }
   ];
+  const accessUsers = (memberships ?? []).map((membership) => {
+    const member = Array.isArray(membership.member) ? membership.member[0] : membership.member;
+    const tenant = Array.isArray(membership.tenants) ? membership.tenants[0] : membership.tenants;
+    return { userId: membership.user_id, tenantId: membership.tenant_id, name: member?.display_name ?? member?.email ?? "Client user", email: member?.email ?? "", tenantName: tenant?.display_name ?? "Client workspace" };
+  });
+  const accessAgents = (agents ?? []).map((agent) => ({ id: agent.id, name: agent.display_name, kind: agent.kind, tenantId: agent.agent_assignments?.find((assignment) => !assignment.valid_to)?.tenant_id ?? null }));
 
   return <main className="subtle-grid min-h-screen p-5 md:p-10">
     <div className="mx-auto max-w-7xl">
@@ -62,6 +71,7 @@ export default async function AdminPage() {
           <article className="glass rounded-2xl p-6"><h2 className="font-semibold">Operations checklist</h2><div className="mt-5 space-y-3">{[{ label: "Tenant boundary", value: "RLS + server checks", icon: ShieldCheck }, { label: "Manual invoices open", value: String(invoiceCount ?? 0), icon: FileText }, { label: "Webhook queue", value: `${pendingEvents ?? 0} exceptions`, icon: Webhook }].map((item) => <div key={item.label} className="flex items-center gap-3 rounded-xl bg-white/70 p-4"><item.icon className="size-5 text-[#1f7659]"/><div><p className="text-sm font-semibold">{item.label}</p><p className="text-xs text-[#84928d]">{item.value}</p></div></div>)}</div></article>
         </div>
       </section>
+      {context.permissions.has("members.manage") && context.permissions.has("agents.manage") && <AgentAccessManager users={accessUsers} agents={accessAgents} grants={(accessGrants ?? []).map((grant) => ({ userId: grant.user_id, agentId: grant.agent_id }))} />}
     </div>
   </main>;
 }
