@@ -28,6 +28,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { cn } from "@/lib/cn";
 import { createClient } from "@/lib/supabase/client";
 import { RetellAgentsView, RetellAnalyticsView, RetellContactsView, RetellPhoneNumbersView, SessionHistoryView } from "./retell-views";
+import { DateRangePicker, type DateRangeValue } from "./date-range-picker";
 
 const nav = [
   { label: "Home", slug: "overview", icon: LayoutDashboard },
@@ -87,13 +88,23 @@ const previewAgents = [
 ];
 
 export function DashboardShell({ preview = false, data, initialView = "Overview" }: { preview?: boolean; data?: DashboardDataset; initialView?: string }) {
-  const dashboard = data ?? { tenantName: "Daiichi Automotive", userName: "Nadeem", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString(), allowedViews: nav.map((item) => item.label) };
+  const dashboard: DashboardDataset = data ?? { tenantName: "Daiichi Automotive", userName: "Nadeem", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString(), allowedViews: nav.map((item) => item.label) };
   const router = useRouter();
   const visibleNav = nav.filter((item) => dashboard.allowedViews.includes(item.label));
   const normalizedInitialView = ({ Overview: "Home", "Voice agents": "Agents", Calls: "Call History", Chat: "Chat History", Reports: "Analytics" } as Record<string, string>)[initialView] ?? initialView;
   const initialAllowedView = dashboard.allowedViews.includes(normalizedInitialView) ? normalizedInitialView : visibleNav[0]?.label ?? "Home";
   const [active, setActive] = useState(initialAllowedView);
-  const [rangeDays, setRangeDays] = useState(7);
+  const reportingEnd = new Date(dashboard.lastSyncedAt).toISOString().slice(0, 10);
+  const reportingMinimum = useMemo(() => {
+    const dates = [...dashboard.calls.map((call) => call.startedAt), ...dashboard.chats.map((chat) => chat.startedAt)]
+      .filter((date): date is string => Boolean(date)).map((date) => date.slice(0, 10)).sort();
+    return dates[0] ?? new Date(new Date(`${reportingEnd}T12:00:00Z`).getTime() - 29 * 86_400_000).toISOString().slice(0, 10);
+  }, [dashboard.calls, dashboard.chats, reportingEnd]);
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => ({
+    start: new Date(new Date(`${reportingEnd}T12:00:00Z`).getTime() - 6 * 86_400_000).toISOString().slice(0, 10),
+    end: reportingEnd,
+    label: "Last 7 days"
+  }));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [query, setQuery] = useState("");
   const filteredCalls = useMemo(
@@ -170,7 +181,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
         <div className="mx-auto max-w-[1500px] p-5 md:p-8 xl:p-10">
           <section className="enter flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div><p className="mb-2 text-xs font-bold uppercase tracking-[.18em] text-[#1f7659]">Performance command center</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{active === "Home" ? `Welcome, ${dashboard.userName}.` : active}</h1><p className="mt-2 text-sm text-[#687a74]">Live, tenant-isolated Retell reporting for {dashboard.tenantName}.</p></div>
-            {["Call History", "Chat History", "Analytics"].includes(active) && <label className="relative"><span className="sr-only">Reporting period</span><CalendarCheck className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-[#1f7659]"/><select value={rangeDays} onChange={(event) => setRangeDays(Number(event.target.value))} className="h-11 appearance-auto rounded-xl border border-[#173f3317] bg-white pl-11 pr-4 text-sm font-medium shadow-sm outline-none focus:border-[#1f7659] focus:ring-4 focus:ring-[#1f765915]"><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option></select></label>}
+            {["Call History", "Chat History", "Analytics"].includes(active) && <DateRangePicker value={dateRange} onChange={setDateRange} minimum={reportingMinimum}/>}
           </section>
 
           {active === "Home" ? <>
@@ -208,7 +219,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
               {filteredCalls.length === 0 && <div className="p-10 text-center text-sm text-[#71817c]">No conversations match your search.</div>}
             </div>
           </section>
-          </> : <WorkspacePage active={active} dashboard={dashboard} query={query} rangeDays={rangeDays} />}
+          </> : <WorkspacePage active={active} dashboard={dashboard} query={query} dateRange={dateRange} />}
         </div>
       </main>
       {mobileOpen && <button aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm lg:hidden" />}
@@ -220,10 +231,11 @@ function EmptyState({ children }: { children: string }) {
   return <div className="rounded-2xl border border-dashed border-[#173f3325] bg-white/55 p-12 text-center text-sm text-[#71817c]">{children}</div>;
 }
 
-function WorkspacePage({ active: selectedView, dashboard, query, rangeDays }: { active: string; dashboard: DashboardDataset; query: string; rangeDays: number }) {
+function WorkspacePage({ active: selectedView, dashboard, query, dateRange }: { active: string; dashboard: DashboardDataset; query: string; dateRange: DateRangeValue }) {
   const active = ({ Agents: "Voice agents", "Call History": "Calls", "Chat History": "Chat", Analytics: "Reports" } as Record<string, string>)[selectedView] ?? selectedView;
-  const cutoff = new Date(dashboard.lastSyncedAt).getTime() - rangeDays * 86_400_000;
-  const inRange = (startedAt?: string) => !startedAt || new Date(startedAt).getTime() >= cutoff;
+  const rangeStart = new Date(`${dateRange.start}T00:00:00.000Z`).getTime();
+  const rangeEnd = new Date(`${dateRange.end}T23:59:59.999Z`).getTime();
+  const inRange = (startedAt?: string) => !startedAt || (new Date(startedAt).getTime() >= rangeStart && new Date(startedAt).getTime() <= rangeEnd);
   const voiceAgents = dashboard.agents.filter((agent) => (selectedView === "Agents" || agent.kind === "voice") && agent.name.toLowerCase().includes(query.toLowerCase()));
   const chatAgents = dashboard.agents.filter((agent) => agent.kind === "chat" && agent.name.toLowerCase().includes(query.toLowerCase()));
   const calls = dashboard.calls.filter((call) => inRange(call.startedAt) && `${call.contact} ${call.agent} ${call.outcome}`.toLowerCase().includes(query.toLowerCase()));
