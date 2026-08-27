@@ -105,7 +105,10 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
   useEffect(() => {
     if (preview) return;
     const supabase = createClient();
-    const channel = supabase.channel("client-user-agent-access").on("postgres_changes", { event: "*", schema: "public", table: "user_agent_access" }, () => router.refresh()).subscribe();
+    const channel = supabase.channel("client-access-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "user_agent_access" }, () => router.refresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "tenant_memberships" }, () => router.refresh())
+      .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [preview, router]);
 
