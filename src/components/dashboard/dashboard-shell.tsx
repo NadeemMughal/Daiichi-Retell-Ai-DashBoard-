@@ -65,9 +65,9 @@ export type DashboardDataset = {
   userName: string;
   metrics: typeof previewMetrics;
   chart: typeof previewChartData;
-  calls: typeof previewCalls;
+  calls: Array<{ contact: string; number: string; agentId?: string; agent: string; outcome: string; duration: string; time: string; tone: string }>;
   agents: Array<{ id: string; name: string; kind: "voice" | "chat"; calls: number; chats: number; score: string; status: string }>;
-  chats: Array<{ id: string; agent: string; outcome: string; messages: number; time: string; status: string }>;
+  chats: Array<{ id: string; agentId?: string; agent: string; outcome: string; messages: number; time: string; status: string }>;
   team: Array<{ name: string; email: string; role: string; status: string }>;
   lastSyncedAt: string;
   allowedViews: string[];
@@ -213,9 +213,26 @@ function WorkspacePage({ active, dashboard, query }: { active: string; dashboard
     {active === "Voice agents" && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{voiceAgents.map((agent) => <article key={agent.id} className="glass rounded-2xl p-6"><div className="flex items-center gap-4"><div className="grid size-12 place-items-center rounded-2xl bg-[#164f3e] text-white"><Bot className="size-6" /></div><div className="min-w-0"><h2 className="truncate font-semibold">{agent.name}</h2><p className="text-xs capitalize text-[#71817c]">{agent.status} voice agent</p></div></div><div className="mt-6 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Calls</p><p className="mt-1 text-2xl font-semibold">{agent.calls}</p></div><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Completion</p><p className="mt-1 text-2xl font-semibold">{agent.score}</p></div></div></article>)}{!voiceAgents.length && <EmptyState>No assigned voice agents match this workspace.</EmptyState>}</div>}
     {active === "Calls" && <ConversationTable calls={calls} />}
     {active === "Chat" && <div className="space-y-5"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{chatAgents.map((agent) => <article key={agent.id} className="glass rounded-2xl p-5"><div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-xl bg-[#164f3e] text-white"><MessageSquareText className="size-5" /></div><div><p className="font-semibold">{agent.name}</p><p className="text-xs text-[#71817c]">{agent.chats} chats · {agent.score} complete</p></div></div></article>)}{!chatAgents.length && <EmptyState>No chat agents are configured in Retell.</EmptyState>}</div><div className="glass overflow-hidden rounded-2xl">{chats.length ? <div className="divide-y divide-[#173f3310]">{chats.map((chat) => <div key={chat.id} className="grid gap-3 p-5 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-center"><div><p className="font-semibold">{chat.agent}</p><p className="text-xs text-[#71817c]">{chat.time}</p></div><p className="text-sm text-[#596a64]">{chat.outcome}</p><span className="text-sm">{chat.messages} AI messages</span><span className="rounded-full bg-[#e7f7ee] px-3 py-1 text-xs font-semibold capitalize text-[#1c674e]">{chat.status}</span></div>)}</div> : <EmptyState>No chat conversations have synchronized yet.</EmptyState>}</div></div>}
-    {active === "Reports" && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{dashboard.metrics.map((metric) => <article key={metric.label} className="glass rounded-2xl p-6"><p className="text-sm text-[#71817c]">{metric.label}</p><p className="mt-2 text-3xl font-semibold">{metric.value}</p><p className="mt-2 text-xs text-[#84928d]">{metric.detail}</p></article>)}</div>}
+    {active === "Reports" && <ReportsView dashboard={dashboard} />}
     {active === "Team" && <div className="glass overflow-hidden rounded-2xl">{dashboard.team.length ? <div className="divide-y divide-[#173f3310]">{dashboard.team.map((member) => <div key={member.email} className="flex items-center gap-4 p-5"><div className="grid size-10 place-items-center rounded-full bg-[#d7f55b] text-sm font-bold text-[#123e32]">{member.name.slice(0, 2).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate font-semibold">{member.name}</p><p className="truncate text-xs text-[#71817c]">{member.email}</p></div><span className="text-sm capitalize text-[#596a64]">{member.role}</span><span className="rounded-full bg-[#e7f7ee] px-3 py-1 text-xs font-semibold capitalize text-[#1c674e]">{member.status}</span></div>)}</div> : <EmptyState>No active team memberships were found.</EmptyState>}</div>}
   </section>;
+}
+
+function ReportsView({ dashboard }: { dashboard: DashboardDataset }) {
+  const [agentId, setAgentId] = useState("all");
+  const selectedAgent = dashboard.agents.find((agent) => agent.id === agentId);
+  const calls = selectedAgent ? dashboard.calls.filter((call) => call.agentId ? call.agentId === selectedAgent.id : call.agent === selectedAgent.name) : dashboard.calls;
+  const chats = selectedAgent ? dashboard.chats.filter((chat) => chat.agentId ? chat.agentId === selectedAgent.id : chat.agent === selectedAgent.name) : dashboard.chats;
+  const successful = [...calls, ...chats].filter((conversation) => /book|qualif|success|resolved/i.test(conversation.outcome)).length;
+  const totalSeconds = calls.reduce((sum, call) => { const [minutes = 0, seconds = 0] = call.duration.split(":").map(Number); return sum + minutes * 60 + seconds; }, 0);
+  const avgSeconds = calls.length ? Math.round(totalSeconds / calls.length) : 0;
+  const metrics = [
+    { label: "Total calls", value: String(calls.length), detail: selectedAgent?.name ?? "all accessible agents" },
+    { label: "Successful outcomes", value: String(successful), detail: `${calls.length + chats.length ? Math.round(successful / (calls.length + chats.length) * 100) : 0}% of conversations` },
+    { label: "Avg. call duration", value: `${Math.floor(avgSeconds / 60)}m ${avgSeconds % 60}s`, detail: calls.length ? "completed calls" : "no calls in period" },
+    { label: "Chat conversations", value: String(chats.length), detail: selectedAgent ? `${selectedAgent.score} completion` : `${dashboard.agents.length} accessible agents` }
+  ];
+  return <div className="space-y-5"><div className="glass flex flex-col gap-4 rounded-2xl p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-[#1f7659]">Agent performance</p><h2 className="mt-1 text-xl font-semibold">{selectedAgent?.name ?? "All accessible agents"}</h2><p className="mt-1 text-xs text-[#71817c]">Only agents assigned to your account are available.</p></div><label className="block"><span className="sr-only">Select an agent</span><select value={agentId} onChange={(event) => setAgentId(event.target.value)} className="h-12 min-w-64 rounded-xl border border-[#173f3317] bg-white px-4 text-sm font-semibold text-[#164f3e] outline-none focus:border-[#1f7659] focus:ring-4 focus:ring-[#1f765915]"><option value="all">All accessible agents</option>{dashboard.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map((metric) => <article key={metric.label} className="glass rounded-2xl p-6"><p className="text-sm text-[#71817c]">{metric.label}</p><p className="mt-2 text-3xl font-semibold">{metric.value}</p><p className="mt-2 text-xs text-[#84928d]">{metric.detail}</p></article>)}</div></div>;
 }
 
 function ConversationTable({ calls }: { calls: DashboardDataset["calls"] }) {
