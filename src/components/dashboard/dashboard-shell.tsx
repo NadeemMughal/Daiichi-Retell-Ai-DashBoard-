@@ -66,9 +66,9 @@ export type DashboardDataset = {
   userName: string;
   metrics: typeof previewMetrics;
   chart: typeof previewChartData;
-  calls: Array<{ contact: string; number: string; agentId?: string; agent: string; outcome: string; duration: string; time: string; tone: string }>;
+  calls: Array<{ contact: string; number: string; agentId?: string; agent: string; outcome: string; duration: string; time: string; startedAt?: string; tone: string }>;
   agents: Array<{ id: string; name: string; kind: "voice" | "chat"; calls: number; chats: number; score: string; status: string }>;
-  chats: Array<{ id: string; agentId?: string; agent: string; outcome: string; messages: number; time: string; status: string }>;
+  chats: Array<{ id: string; agentId?: string; agent: string; outcome: string; messages: number; time: string; startedAt?: string; status: string }>;
   team: Array<{ name: string; email: string; role: string; status: string }>;
   lastSyncedAt: string;
   allowedViews: string[];
@@ -88,7 +88,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
   const visibleNav = nav.filter((item) => dashboard.allowedViews.includes(item.label));
   const initialAllowedView = dashboard.allowedViews.includes(initialView) ? initialView : visibleNav[0]?.label ?? "Overview";
   const [active, setActive] = useState(initialAllowedView);
-  const [range, setRange] = useState("Last 7 days");
+  const [rangeDays, setRangeDays] = useState(7);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [query, setQuery] = useState("");
   const filteredCalls = useMemo(
@@ -108,6 +108,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
     const channel = supabase.channel("client-access-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "user_agent_access" }, () => router.refresh())
       .on("postgres_changes", { event: "*", schema: "public", table: "tenant_memberships" }, () => router.refresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "dashboard_refresh_signals" }, () => router.refresh())
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [preview, router]);
@@ -164,7 +165,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
         <div className="mx-auto max-w-[1500px] p-5 md:p-8 xl:p-10">
           <section className="enter flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div><p className="mb-2 text-xs font-bold uppercase tracking-[.18em] text-[#1f7659]">Performance command center</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{active === "Overview" ? `Welcome, ${dashboard.userName}.` : active}</h1><p className="mt-2 text-sm text-[#687a74]">Live, tenant-isolated Retell reporting for {dashboard.tenantName}.</p></div>
-            <button onClick={() => setRange(range === "Last 7 days" ? "Last 30 days" : "Last 7 days")} className="flex h-11 items-center justify-center gap-2 rounded-xl border border-[#173f3317] bg-white px-4 text-sm font-medium shadow-sm"><CalendarCheck className="size-4 text-[#1f7659]" />{range}<ChevronDown className="size-4" /></button>
+            {["Calls", "Chat", "Reports"].includes(active) && <label className="relative"><span className="sr-only">Reporting period</span><CalendarCheck className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-[#1f7659]"/><select value={rangeDays} onChange={(event) => setRangeDays(Number(event.target.value))} className="h-11 appearance-auto rounded-xl border border-[#173f3317] bg-white pl-11 pr-4 text-sm font-medium shadow-sm outline-none focus:border-[#1f7659] focus:ring-4 focus:ring-[#1f765915]"><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option></select></label>}
           </section>
 
           {active === "Overview" ? <>
@@ -202,7 +203,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
               {filteredCalls.length === 0 && <div className="p-10 text-center text-sm text-[#71817c]">No conversations match your search.</div>}
             </div>
           </section>
-          </> : <WorkspacePage active={active} dashboard={dashboard} query={query} />}
+          </> : <WorkspacePage active={active} dashboard={dashboard} query={query} rangeDays={rangeDays} />}
         </div>
       </main>
       {mobileOpen && <button aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm lg:hidden" />}
@@ -214,16 +215,18 @@ function EmptyState({ children }: { children: string }) {
   return <div className="rounded-2xl border border-dashed border-[#173f3325] bg-white/55 p-12 text-center text-sm text-[#71817c]">{children}</div>;
 }
 
-function WorkspacePage({ active, dashboard, query }: { active: string; dashboard: DashboardDataset; query: string }) {
+function WorkspacePage({ active, dashboard, query, rangeDays }: { active: string; dashboard: DashboardDataset; query: string; rangeDays: number }) {
+  const cutoff = new Date(dashboard.lastSyncedAt).getTime() - rangeDays * 86_400_000;
+  const inRange = (startedAt?: string) => !startedAt || new Date(startedAt).getTime() >= cutoff;
   const voiceAgents = dashboard.agents.filter((agent) => agent.kind === "voice" && agent.name.toLowerCase().includes(query.toLowerCase()));
   const chatAgents = dashboard.agents.filter((agent) => agent.kind === "chat" && agent.name.toLowerCase().includes(query.toLowerCase()));
-  const calls = dashboard.calls.filter((call) => `${call.contact} ${call.agent} ${call.outcome}`.toLowerCase().includes(query.toLowerCase()));
-  const chats = dashboard.chats.filter((chat) => `${chat.agent} ${chat.outcome} ${chat.status}`.toLowerCase().includes(query.toLowerCase()));
+  const calls = dashboard.calls.filter((call) => inRange(call.startedAt) && `${call.contact} ${call.agent} ${call.outcome}`.toLowerCase().includes(query.toLowerCase()));
+  const chats = dashboard.chats.filter((chat) => inRange(chat.startedAt) && `${chat.agent} ${chat.outcome} ${chat.status}`.toLowerCase().includes(query.toLowerCase()));
   return <section className="mt-8">
     {active === "Voice agents" && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{voiceAgents.map((agent) => <article key={agent.id} className="glass rounded-2xl p-6"><div className="flex items-center gap-4"><div className="grid size-12 place-items-center rounded-2xl bg-[#164f3e] text-white"><Bot className="size-6" /></div><div className="min-w-0"><h2 className="truncate font-semibold">{agent.name}</h2><p className="text-xs capitalize text-[#71817c]">{agent.status} voice agent</p></div></div><div className="mt-6 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Calls</p><p className="mt-1 text-2xl font-semibold">{agent.calls}</p></div><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Completion</p><p className="mt-1 text-2xl font-semibold">{agent.score}</p></div></div></article>)}{!voiceAgents.length && <EmptyState>No assigned voice agents match this workspace.</EmptyState>}</div>}
     {active === "Calls" && <ConversationTable calls={calls} />}
     {active === "Chat" && <div className="space-y-5"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{chatAgents.map((agent) => <article key={agent.id} className="glass rounded-2xl p-5"><div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-xl bg-[#164f3e] text-white"><MessageSquareText className="size-5" /></div><div><p className="font-semibold">{agent.name}</p><p className="text-xs text-[#71817c]">{agent.chats} chats · {agent.score} complete</p></div></div></article>)}{!chatAgents.length && <EmptyState>No chat agents are configured in Retell.</EmptyState>}</div><div className="glass overflow-hidden rounded-2xl">{chats.length ? <div className="divide-y divide-[#173f3310]">{chats.map((chat) => <div key={chat.id} className="grid gap-3 p-5 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-center"><div><p className="font-semibold">{chat.agent}</p><p className="text-xs text-[#71817c]">{chat.time}</p></div><p className="text-sm text-[#596a64]">{chat.outcome}</p><span className="text-sm">{chat.messages} AI messages</span><span className="rounded-full bg-[#e7f7ee] px-3 py-1 text-xs font-semibold capitalize text-[#1c674e]">{chat.status}</span></div>)}</div> : <EmptyState>No chat conversations have synchronized yet.</EmptyState>}</div></div>}
-    {active === "Reports" && <ReportsView dashboard={dashboard} />}
+    {active === "Reports" && <ReportsView dashboard={{ ...dashboard, calls, chats }} />}
     {active === "Team" && <div className="glass overflow-hidden rounded-2xl">{dashboard.team.length ? <div className="divide-y divide-[#173f3310]">{dashboard.team.map((member) => <div key={member.email} className="flex items-center gap-4 p-5"><div className="grid size-10 place-items-center rounded-full bg-[#d7f55b] text-sm font-bold text-[#123e32]">{member.name.slice(0, 2).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate font-semibold">{member.name}</p><p className="truncate text-xs text-[#71817c]">{member.email}</p></div><span className="text-sm capitalize text-[#596a64]">{member.role}</span><span className="rounded-full bg-[#e7f7ee] px-3 py-1 text-xs font-semibold capitalize text-[#1c674e]">{member.status}</span></div>)}</div> : <EmptyState>No active team memberships were found.</EmptyState>}</div>}
   </section>;
 }

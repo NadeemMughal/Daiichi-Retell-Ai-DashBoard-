@@ -11,7 +11,7 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const context = await requireAuthorizationContext();
   requirePermission(context, "agents.read");
   const admin = createAdminClient();
-  const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 6); periodStart.setUTCHours(0, 0, 0, 0);
+  const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 29); periodStart.setUTCHours(0, 0, 0, 0);
   const [profileResult, agentsResult, callsResult, chatsResult, membershipsResult] = await Promise.all([
     admin.from("profiles").select("display_name,email").eq("id", context.userId).single(),
     admin.from("retell_agents").select("id,display_name,kind,status").eq("status", "active").order("display_name"),
@@ -26,7 +26,8 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const activeAgentIds = new Set(agents.map((agent) => agent.id));
   const callRows = (callsResult.data ?? []).filter((call) => activeAgentIds.has(call.agent_id));
   const chatRows = (chatsResult.data ?? []).filter((chat) => activeAgentIds.has(chat.agent_id));
-  const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(periodStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
+  const chartStart = new Date(); chartStart.setUTCDate(chartStart.getUTCDate() - 6); chartStart.setUTCHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(chartStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
   const chart = days.map((date) => { const sameDay = callRows.filter((call) => call.started_at && dayKey(new Date(call.started_at)) === dayKey(date)); return { day: date.toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }), calls: sameDay.length, converted: sameDay.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length }; });
   const successful = callRows.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length;
   const totalSeconds = Math.round(callRows.reduce((sum, call) => sum + Number(call.duration_ms ?? 0), 0) / 1000);
@@ -49,8 +50,8 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
       { label: "Active agents", value: String(agentRows.length), change: "Global", detail: "voice and chat", positive: true }
     ], chart,
     agents: agentRows,
-    calls: callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Retell agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning" })),
-    chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Retell agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", status: chat.status })),
+    calls: callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Retell agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning" })),
+    chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Retell agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status })),
     team: (membershipsResult.data ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }),
     lastSyncedAt: new Date().toISOString(),
     allowedViews: ["Overview", "Voice agents", "Calls", "Chat", "Reports", "Team"]
@@ -71,7 +72,7 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
     dashboardUserId = effectiveUserId;
     dashboardPermissions = new Set<Permission>(permissionsForTenantRole(targetMembership.role as TenantRole));
   }
-  const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 6); periodStart.setUTCHours(0, 0, 0, 0);
+  const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 29); periodStart.setUTCHours(0, 0, 0, 0);
   const [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult] = await Promise.all([
     admin.from("tenants").select("display_name").eq("id", context.tenantId).single(),
     admin.from("profiles").select("display_name,email").eq("id", dashboardUserId).single(),
@@ -95,7 +96,8 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   const allowedAgentIds = new Set(context.platformRoles.length && !viewingAnotherUser ? tenantAgentIds : (accessResult?.data ?? []).map((grant) => grant.agent_id));
   const callRows = (calls ?? []).filter((call) => allowedAgentIds.has(call.agent_id));
   const chatRows = (chats ?? []).filter((chat) => allowedAgentIds.has(chat.agent_id));
-  const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(periodStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
+  const chartStart = new Date(); chartStart.setUTCDate(chartStart.getUTCDate() - 6); chartStart.setUTCHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(chartStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
   const chart = days.map((date) => { const sameDay = callRows.filter((call) => call.started_at && dayKey(new Date(call.started_at)) === dayKey(date)); return { day: date.toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }), calls: sameDay.length, converted: sameDay.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length }; });
   const totalSeconds = Math.round(callRows.reduce((sum, call) => sum + Number(call.duration_ms ?? 0), 0) / 1000);
   const successful = callRows.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length;
@@ -128,8 +130,8 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
       { label: "Active agents", value: String(agentRows.filter((agent) => agent.status === "active").length), change: "Assigned", detail: "to this workspace", positive: true }
     ], chart,
     agents: context.permissions.has("agents.read") ? agentRows : [],
-    calls: context.permissions.has("calls.read") ? callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning" })) : [],
-    chats: context.permissions.has("chats.read") ? chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Assigned agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", status: chat.status })) : [],
+    calls: dashboardPermissions.has("calls.read") ? callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning" })) : [],
+    chats: dashboardPermissions.has("chats.read") ? chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Assigned agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status })) : [],
     team: context.permissions.has("members.read") ? (memberships ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }) : [],
     lastSyncedAt: new Date().toISOString(),
     allowedViews
