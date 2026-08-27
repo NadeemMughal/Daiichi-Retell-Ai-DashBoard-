@@ -10,11 +10,13 @@ import { PlatformAdminManager } from "./platform-admin-manager";
 export const dynamic = "force-dynamic";
 
 const portalPages = [
-  { label: "Overview", href: "/admin/dashboard?view=Overview", icon: LayoutDashboard },
-  { label: "Voice agents", href: "/admin/dashboard?view=Voice%20agents", icon: Bot },
-  { label: "Calls", href: "/admin/dashboard?view=Calls", icon: Phone },
-  { label: "Chat", href: "/admin/dashboard?view=Chat", icon: MessageSquareText },
-  { label: "Reports", href: "/admin/dashboard?view=Reports", icon: FileText },
+  { label: "Home", href: "/admin/dashboard?view=Home", icon: LayoutDashboard },
+  { label: "Agents", href: "/admin/dashboard?view=Agents", icon: Bot },
+  { label: "Phone Numbers", href: "/admin/dashboard?view=Phone%20Numbers", icon: Phone },
+  { label: "Call History", href: "/admin/dashboard?view=Call%20History", icon: Phone },
+  { label: "Chat History", href: "/admin/dashboard?view=Chat%20History", icon: MessageSquareText },
+  { label: "Contacts", href: "/admin/dashboard?view=Contacts", icon: Users },
+  { label: "Analytics", href: "/admin/dashboard?view=Analytics", icon: FileText },
   { label: "Team", href: "/admin/dashboard?view=Team", icon: Users }
 ];
 

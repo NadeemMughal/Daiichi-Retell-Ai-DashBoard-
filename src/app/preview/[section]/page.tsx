@@ -7,6 +7,8 @@ const sections: Record<string, string> = {
   calls: "Calls",
   chat: "Chat",
   reports: "Reports",
+  "phone-numbers": "Phone Numbers",
+  contacts: "Contacts",
   team: "Team"
 };
 

@@ -23,3 +23,16 @@ export async function listRetellAgents() {
     chat: (chat.items ?? []).map((agent) => ({ providerAgentId: agent.agent_id, displayName: agent.agent_name || "Unnamed chat agent", modifiedAt: agent.user_modified_timestamp }))
   };
 }
+
+export async function listRetellPhoneNumbers() {
+  const response = await createRetellClient().phoneNumber.list({ limit: 1000 });
+  return (response.items ?? []).map((number) => ({
+    number: number.phone_number,
+    prettyNumber: number.phone_number_pretty ?? number.phone_number,
+    nickname: number.nickname ?? "Retell phone number",
+    type: number.phone_number_type,
+    inboundAgentIds: (number.inbound_agents ?? []).map((agent) => agent.agent_id),
+    outboundAgentIds: (number.outbound_agents ?? []).map((agent) => agent.agent_id),
+    modifiedAt: new Date(number.last_modification_timestamp).toISOString()
+  }));
+}

@@ -3,7 +3,9 @@ import { z } from "zod";
 import { requireAuthorizationContext } from "@/lib/auth/context";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const details = z.object({ userId: z.string().uuid().optional(), name: z.string().trim().min(2).max(100), email: z.string().trim().email().transform((v) => v.toLowerCase()), password: z.string().min(8).max(128).optional() });
+const optionalUuid = z.preprocess((value) => value === "" ? undefined : value, z.string().uuid().optional());
+const optionalPassword = z.preprocess((value) => value === "" ? undefined : value, z.string().min(8).max(128).optional());
+const details = z.object({ userId: optionalUuid, name: z.string().trim().min(2).max(100), email: z.string().trim().email().transform((v) => v.toLowerCase()), password: optionalPassword });
 const removal = z.object({ userId: z.string().uuid() });
 async function requireSuperAdmin() { const context = await requireAuthorizationContext(); if (!context.platformRoles.includes("super_admin")) return null; return context; }
 
