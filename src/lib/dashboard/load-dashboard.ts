@@ -11,14 +11,22 @@ export async function loadDashboard(tenantSlug: string): Promise<DashboardDatase
   if (!context.tenantId) throw new Error("Tenant context is required.");
   const admin = createAdminClient();
   const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 6); periodStart.setUTCHours(0, 0, 0, 0);
-  const [{ data: tenant }, { data: profile }, { data: calls }, { data: chats }, { data: assignments }, { data: memberships }] = await Promise.all([
+  const [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult] = await Promise.all([
     admin.from("tenants").select("display_name").eq("id", context.tenantId).single(),
     admin.from("profiles").select("display_name,email").eq("id", context.userId).single(),
     admin.from("calls").select("id,agent_id,status,started_at,duration_ms,outcome,contact_masked").eq("tenant_id", context.tenantId).gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
     admin.from("chats").select("id,agent_id,status,started_at,ai_message_count,outcome").eq("tenant_id", context.tenantId).gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
     admin.from("agent_assignments").select("agent_id,retell_agents(id,display_name,kind,status)").eq("tenant_id", context.tenantId).is("valid_to", null),
-    admin.from("tenant_memberships").select("role,status,profiles(display_name,email)").eq("tenant_id", context.tenantId).neq("status", "removed")
+    admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").eq("tenant_id", context.tenantId).neq("status", "removed")
   ]);
+  const failedQuery = [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult].find((result) => result.error);
+  if (failedQuery?.error) throw new Error(`Dashboard data unavailable: ${failedQuery.error.code}`);
+  const tenant = tenantResult.data;
+  const profile = profileResult.data;
+  const calls = callsResult.data;
+  const chats = chatsResult.data;
+  const assignments = assignmentsResult.data;
+  const memberships = membershipsResult.data;
   const callRows = calls ?? []; const chatRows = chats ?? [];
   const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(periodStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
   const chart = days.map((date) => { const sameDay = callRows.filter((call) => call.started_at && dayKey(new Date(call.started_at)) === dayKey(date)); return { day: date.toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }), calls: sameDay.length, converted: sameDay.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length }; });
@@ -45,7 +53,7 @@ export async function loadDashboard(tenantSlug: string): Promise<DashboardDatase
     ], chart, agents: agentRows,
     calls: callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning" })),
     chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Assigned agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", status: chat.status })),
-    team: (memberships ?? []).map((membership) => { const member = Array.isArray(membership.profiles) ? membership.profiles[0] : membership.profiles; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }),
+    team: (memberships ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }),
     lastSyncedAt: new Date().toISOString()
   };
 }
