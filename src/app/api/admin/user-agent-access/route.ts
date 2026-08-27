@@ -41,6 +41,6 @@ export async function POST(request: Request) {
     if (revoked.error) return NextResponse.json({ error: "ACCESS_REVOKE_FAILED" }, { status: 503 });
   }
 
-  await admin.from("audit_logs").insert({ tenant_id: tenantId, actor_user_id: context.userId, action: `user_agent_access.${action}ed`, target_type: "retell_agent", target_id: agentId, safe_metadata: { userId } });
+  await admin.from("audit_logs").insert({ tenant_id: tenantId, actor_user_id: context.userId, action: action === "grant" ? "user_agent_access.granted" : "user_agent_access.revoked", target_type: "retell_agent", target_id: agentId, safe_metadata: { userId } });
   return NextResponse.json({ ok: true, action });
 }
