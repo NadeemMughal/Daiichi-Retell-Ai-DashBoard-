@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, ChevronDown, CirclePlus, ContactRound, Database, Download, Filter, MoreVertical, Phone, RefreshCw, Search, Settings2, UserPlus } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { DashboardDataset } from "./dashboard-shell";
@@ -56,6 +56,12 @@ export function SessionHistoryView({ kind, calls, chats }: { kind: "call" | "cha
 function ActionItem({ icon: Icon, label, disabled = false }: { icon: typeof Settings2; label: string; disabled?: boolean }) { return <button type="button" disabled={disabled} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-[#f1f3f5] disabled:cursor-not-allowed disabled:text-[#a4acb7]"><Icon className="size-4"/>{label}</button>; }
 
 export function RetellContactsView({ calls }: { calls: DashboardDataset["calls"] }) {
+  useEffect(() => {
+    const settingsButton = document.querySelector<HTMLButtonElement>('[aria-label="Contact display settings"]');
+    if (!settingsButton) return;
+    settingsButton.disabled = true;
+    settingsButton.title = "Contact columns are fixed to the authorized Retell fields.";
+  }, []);
   const [search, setSearch] = useState(""); const [filterOpen, setFilterOpen] = useState(false); const [actionsOpen, setActionsOpen] = useState(false); const [filterField, setFilterField] = useState("all");
   const contacts = useMemo(() => Array.from(new Map(calls.map((call) => [call.number, call])).values()).map((contact) => ({ ...contact, conversations: calls.filter((call) => call.number === contact.number).length })), [calls]);
   const rows = contacts.filter((contact) => `${contact.contact} ${contact.number} ${contact.time}`.toLowerCase().includes(search.toLowerCase()) && (filterField === "all" || (filterField === "phone" && contact.number !== "—") || (filterField === "latest" && Boolean(contact.time))));

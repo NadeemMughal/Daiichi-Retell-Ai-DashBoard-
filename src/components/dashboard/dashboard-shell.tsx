@@ -9,14 +9,12 @@ import {
   ArrowUpRight,
   Bot,
   CalendarCheck,
-  ChevronDown,
   Clock3,
   FileText,
   Headphones,
   LayoutDashboard,
   Menu,
   MessageSquareText,
-  MoreHorizontal,
   Phone,
   RefreshCw,
   Search,
@@ -107,6 +105,10 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
   }));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const navigateTo = (view: string) => {
+    setActive(view); setMobileOpen(false);
+    if (!preview) router.replace(`?view=${encodeURIComponent(view)}`, { scroll: false });
+  };
   const filteredCalls = useMemo(
     () => dashboard.calls.filter((call) => `${call.contact} ${call.agent} ${call.outcome}`.toLowerCase().includes(query.toLowerCase())),
     [dashboard.calls, query]
@@ -139,21 +141,21 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
       <aside className={cn("fixed inset-y-0 left-0 z-40 w-[280px] border-r border-white/10 bg-[#123e32] text-white transition-transform lg:sticky lg:top-0 lg:w-auto lg:translate-x-0", preview && "pt-8", mobileOpen ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex h-full flex-col p-5">
           <div className="flex items-center justify-between px-2 py-3">
-            <Link href={preview ? "/admin" : "/"} className="flex items-center gap-3 rounded-xl transition hover:opacity-85" aria-label="Return to Daiichi home">
+            <Link href={preview ? "/preview/overview" : "/"} className="flex items-center gap-3 rounded-xl transition hover:opacity-85" aria-label="Return to Daiichi home">
               <div className="grid size-10 place-items-center rounded-xl bg-[#d7f55b] font-black text-[#123e32]">D</div>
               <div><p className="text-[10px] uppercase tracking-[.25em] text-white/55">Daiichi</p><p className="font-semibold">Agent Intelligence</p></div>
             </Link>
             <button aria-label="Close menu" onClick={() => setMobileOpen(false)} className="rounded-lg p-2 hover:bg-white/10 lg:hidden"><X className="size-5" /></button>
           </div>
           <div className="mt-7 rounded-2xl border border-white/10 bg-white/7 p-3">
-            <button className="flex w-full items-center gap-3 text-left">
+            <div className="flex w-full items-center gap-3 text-left">
               <div className="grid size-9 place-items-center rounded-lg bg-white/12 text-sm font-bold">DA</div>
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{dashboard.tenantName}</p><p className="truncate text-xs text-white/50">Client workspace</p></div>
-              <ChevronDown className="size-4 text-white/60" />
-            </button>
+              <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-semibold text-white/65">Active</span>
+            </div>
           </div>
           <nav className="mt-7 space-y-1" aria-label="Primary navigation">
-            {visibleNav.map((item) => preview ? <Link key={item.label} href={`/preview/${item.slug}`} onClick={() => setMobileOpen(false)} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</Link> : <button key={item.label} onClick={() => { setActive(item.label); setMobileOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</button>)}
+            {visibleNav.map((item) => preview ? <Link key={item.label} href={`/preview/${item.slug}`} onClick={() => setMobileOpen(false)} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</Link> : <button key={item.label} onClick={() => navigateTo(item.label)} className={cn("flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition", active === item.label ? "bg-white text-[#164f3e] shadow-lg" : "text-white/65 hover:bg-white/8 hover:text-white")}><item.icon className="size-[18px]" />{item.label}</button>)}
           </nav>
           <div className="mt-auto space-y-1 border-t border-white/10 pt-4">
             <Link href="/admin" className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-white/65 hover:bg-white/8 hover:text-white"><Settings className="size-[18px]" />Back to operations</Link>
@@ -168,10 +170,10 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
       <main className={cn("min-w-0", preview && "pt-8")}>
         <header className="sticky top-0 z-30 flex h-[76px] items-center gap-4 border-b border-[#173f3314] bg-[#f4f6f2dd] px-5 backdrop-blur-xl md:px-8">
           <button aria-label="Open menu" onClick={() => setMobileOpen(true)} className="rounded-xl border border-[#173f331a] bg-white p-2.5 lg:hidden"><Menu className="size-5" /></button>
-          <div className="relative hidden max-w-sm flex-1 sm:block">
+          {active === "Home" && <div className="relative hidden max-w-sm flex-1 sm:block">
             <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[#70827c]" />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search calls, agents, outcomes..." className="h-11 w-full rounded-xl border border-[#173f3317] bg-white/70 pl-10 pr-4 text-sm outline-none transition focus:border-[#1f7659] focus:ring-4 focus:ring-[#1f765915]" />
-          </div>
+          </div>}
           <div className="ml-auto flex items-center gap-3">
             <div className="hidden items-center gap-2 rounded-full bg-[#e7f7ee] px-3 py-2 text-xs font-semibold text-[#1c674e] md:flex"><span className="size-2 animate-pulse rounded-full bg-[#28a06f]" />Live · refreshed {new Date(dashboard.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
             <button aria-label="Refresh dashboard" onClick={() => router.refresh()} className="grid size-10 place-items-center rounded-xl border border-[#173f3317] bg-white"><RefreshCw className="size-5 text-[#1f7659]" /></button>
@@ -198,7 +200,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
 
           <section className="mt-5 grid gap-5 xl:grid-cols-[1.65fr_1fr]">
             <article className="glass rounded-2xl p-5 md:p-6">
-              <div className="flex items-center justify-between"><div><h2 className="font-semibold">Conversation volume</h2><p className="mt-1 text-xs text-[#7c8c87]">Calls and successful outcomes</p></div><button className="rounded-lg p-2 hover:bg-[#edf1ee]"><MoreHorizontal className="size-5" /></button></div>
+              <div className="flex items-center justify-between"><div><h2 className="font-semibold">Conversation volume</h2><p className="mt-1 text-xs text-[#7c8c87]">Calls and successful outcomes</p></div><span className="rounded-full bg-[#e8f3ed] px-3 py-1 text-xs font-semibold text-[#1f7659]">Live reporting</span></div>
               <div className="mt-6 h-[285px]">
                 <ResponsiveContainer width="100%" height="100%"><AreaChart data={dashboard.chart} margin={{ left: -20, right: 8 }}><defs><linearGradient id="calls" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#1f7659" stopOpacity={0.28}/><stop offset="95%" stopColor="#1f7659" stopOpacity={0}/></linearGradient></defs><CartesianGrid vertical={false} stroke="#173f3312"/><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#7c8c87", fontSize: 11 }}/><YAxis axisLine={false} tickLine={false} tick={{ fill: "#7c8c87", fontSize: 11 }}/><Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #173f3315", boxShadow: "0 12px 30px #173f3318" }}/><Area type="monotone" dataKey="calls" stroke="#1f7659" strokeWidth={3} fill="url(#calls)"/><Area type="monotone" dataKey="converted" stroke="#a1c72f" strokeWidth={2} fill="transparent"/></AreaChart></ResponsiveContainer>
               </div>
@@ -213,7 +215,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
           </section>
 
           <section className="glass mt-5 overflow-hidden rounded-2xl">
-            <div className="flex flex-col gap-3 border-b border-[#173f3310] p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold">Recent conversations</h2><p className="mt-1 text-xs text-[#7c8c87]">Latest activity across your agents</p></div><button className="text-left text-sm font-semibold text-[#1f7659] hover:underline">View all calls</button></div>
+            <div className="flex flex-col gap-3 border-b border-[#173f3310] p-5 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold">Recent conversations</h2><p className="mt-1 text-xs text-[#7c8c87]">Latest activity across your agents</p></div><button onClick={() => navigateTo("Call History")} className="text-left text-sm font-semibold text-[#1f7659] transition hover:translate-x-0.5 hover:underline">View all calls</button></div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-left"><thead><tr className="border-b border-[#173f330d] text-[10px] uppercase tracking-[.14em] text-[#82918c]"><th className="px-5 py-3 font-semibold">Contact</th><th className="px-5 py-3 font-semibold">Agent</th><th className="px-5 py-3 font-semibold">Outcome</th><th className="px-5 py-3 font-semibold">Duration</th><th className="px-5 py-3 font-semibold">Time</th></tr></thead><tbody>{filteredCalls.map((call) => <tr key={`${call.contact}-${call.time}`} className="border-b border-[#173f3308] text-sm transition last:border-0 hover:bg-[#f4f8f5]"><td className="px-5 py-4"><p className="font-semibold">{call.contact}</p><p className="mt-0.5 text-xs text-[#87958f]">{call.number}</p></td><td className="px-5 py-4 text-[#596a64]">{call.agent}</td><td className="px-5 py-4"><span className={cn("inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", call.tone === "success" ? "bg-[#e5f7eb] text-[#23724f]" : "bg-[#fff0dc] text-[#98601f]")}>{call.outcome}</span></td><td className="px-5 py-4 text-[#596a64]">{call.duration}</td><td className="px-5 py-4 text-[#596a64]">{call.time}</td></tr>)}</tbody></table>
               {filteredCalls.length === 0 && <div className="p-10 text-center text-sm text-[#71817c]">No conversations match your search.</div>}
