@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { cn } from "@/lib/cn";
+import { createClient } from "@/lib/supabase/client";
 
 const nav = [
   { label: "Overview", slug: "overview", icon: LayoutDashboard },
@@ -100,6 +101,12 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
     const timer = window.setInterval(refresh, 20_000);
     window.addEventListener("focus", refresh);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [preview, router]);
+  useEffect(() => {
+    if (preview) return;
+    const supabase = createClient();
+    const channel = supabase.channel("client-user-agent-access").on("postgres_changes", { event: "*", schema: "public", table: "user_agent_access" }, () => router.refresh()).subscribe();
+    return () => { void supabase.removeChannel(channel); };
   }, [preview, router]);
 
   return (

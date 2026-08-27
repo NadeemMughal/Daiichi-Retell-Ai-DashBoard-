@@ -6,6 +6,56 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 function dayKey(date: Date) { return date.toISOString().slice(0, 10); }
 
+export async function loadOwnerDashboard(): Promise<DashboardDataset> {
+  const context = await requireAuthorizationContext();
+  requirePermission(context, "platform.manage");
+  const admin = createAdminClient();
+  const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 6); periodStart.setUTCHours(0, 0, 0, 0);
+  const [profileResult, agentsResult, callsResult, chatsResult, membershipsResult] = await Promise.all([
+    admin.from("profiles").select("display_name,email").eq("id", context.userId).single(),
+    admin.from("retell_agents").select("id,display_name,kind,status").eq("status", "active").order("display_name"),
+    admin.from("calls").select("id,agent_id,status,started_at,duration_ms,outcome,contact_masked").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
+    admin.from("chats").select("id,agent_id,status,started_at,ai_message_count,outcome").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
+    admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").neq("status", "removed")
+  ]);
+  const failedQuery = [profileResult, agentsResult, callsResult, chatsResult, membershipsResult].find((result) => result.error);
+  if (failedQuery?.error) throw new Error(`Owner dashboard unavailable: ${failedQuery.error.code}`);
+  const profile = profileResult.data;
+  const agents = agentsResult.data ?? [];
+  const activeAgentIds = new Set(agents.map((agent) => agent.id));
+  const callRows = (callsResult.data ?? []).filter((call) => activeAgentIds.has(call.agent_id));
+  const chatRows = (chatsResult.data ?? []).filter((chat) => activeAgentIds.has(chat.agent_id));
+  const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(periodStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
+  const chart = days.map((date) => { const sameDay = callRows.filter((call) => call.started_at && dayKey(new Date(call.started_at)) === dayKey(date)); return { day: date.toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }), calls: sameDay.length, converted: sameDay.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length }; });
+  const successful = callRows.filter((call) => /book|qualif|success|resolved/i.test(call.outcome ?? "")).length;
+  const totalSeconds = Math.round(callRows.reduce((sum, call) => sum + Number(call.duration_ms ?? 0), 0) / 1000);
+  const avgSeconds = callRows.length ? Math.round(totalSeconds / callRows.length) : 0;
+  const agentRows = agents.map((agent) => {
+    const callCount = callRows.filter((call) => call.agent_id === agent.id).length;
+    const chatCount = chatRows.filter((chat) => chat.agent_id === agent.id).length;
+    const kind = agent.kind as "voice" | "chat";
+    const completed = kind === "chat" ? chatRows.filter((chat) => chat.agent_id === agent.id && /ended|analyzed/i.test(chat.status)).length : callRows.filter((call) => call.agent_id === agent.id && /ended|analyzed/i.test(call.status)).length;
+    const volume = kind === "chat" ? chatCount : callCount;
+    return { id: agent.id, name: agent.display_name, kind, calls: callCount, chats: chatCount, score: volume ? `${Math.round(completed / volume * 100)}%` : "—", status: agent.status };
+  });
+  return {
+    tenantName: "Daiichi Technologies",
+    userName: profile?.display_name?.split(" ")[0] ?? profile?.email?.split("@")[0] ?? "Nadeem",
+    metrics: [
+      { label: "Total calls", value: String(callRows.length), change: "Live", detail: "all agents · last 7 days", positive: true },
+      { label: "Successful outcomes", value: String(successful), change: callRows.length ? `${Math.round(successful / callRows.length * 100)}%` : "0%", detail: "of conversations", positive: true },
+      { label: "Avg. duration", value: `${Math.floor(avgSeconds / 60)}m ${avgSeconds % 60}s`, change: "Live", detail: "completed calls", positive: true },
+      { label: "Active agents", value: String(agentRows.length), change: "Global", detail: "voice and chat", positive: true }
+    ], chart,
+    agents: agentRows,
+    calls: callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Retell agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning" })),
+    chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Retell agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", status: chat.status })),
+    team: (membershipsResult.data ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }),
+    lastSyncedAt: new Date().toISOString(),
+    allowedViews: ["Overview", "Voice agents", "Calls", "Chat", "Reports", "Team"]
+  };
+}
+
 export async function loadDashboard(tenantSlug: string): Promise<DashboardDataset> {
   const context = await requireAuthorizationContext(tenantSlug);
   requirePermission(context, "tenants.read");

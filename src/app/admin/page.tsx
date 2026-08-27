@@ -8,12 +8,12 @@ import { AgentAccessManager } from "./agent-access-manager";
 export const dynamic = "force-dynamic";
 
 const portalPages = [
-  { label: "Overview", href: "/preview/overview", icon: LayoutDashboard },
-  { label: "Voice agents", href: "/preview/voice-agents", icon: Bot },
-  { label: "Calls", href: "/preview/calls", icon: Phone },
-  { label: "Chat", href: "/preview/chat", icon: MessageSquareText },
-  { label: "Reports", href: "/preview/reports", icon: FileText },
-  { label: "Team", href: "/preview/team", icon: Users }
+  { label: "Overview", href: "/admin/dashboard?view=Overview", icon: LayoutDashboard },
+  { label: "Voice agents", href: "/admin/dashboard?view=Voice%20agents", icon: Bot },
+  { label: "Calls", href: "/admin/dashboard?view=Calls", icon: Phone },
+  { label: "Chat", href: "/admin/dashboard?view=Chat", icon: MessageSquareText },
+  { label: "Reports", href: "/admin/dashboard?view=Reports", icon: FileText },
+  { label: "Team", href: "/admin/dashboard?view=Team", icon: Users }
 ];
 
 export default async function AdminPage() {
@@ -51,11 +51,11 @@ export default async function AdminPage() {
         </Link>
         <div className="sm:ml-auto flex flex-wrap gap-2">
           <Link href="/admin" className="flex items-center gap-2 rounded-xl bg-[#164f3e] px-4 py-2.5 text-sm font-semibold text-white"><LayoutDashboard className="size-4" />Operations</Link>
-          <Link href="/preview" className="flex items-center gap-2 rounded-xl border border-[#173f3317] bg-white px-4 py-2.5 text-sm font-semibold text-[#164f3e]"><Eye className="size-4" />Portal preview</Link>
+          <Link href="/admin/dashboard" className="flex items-center gap-2 rounded-xl border border-[#173f3317] bg-white px-4 py-2.5 text-sm font-semibold text-[#164f3e]"><Eye className="size-4" />Owner dashboard</Link>
         </div>
       </nav>
 
-      <section className="mb-8"><div className="mb-3 flex items-end justify-between"><div><h2 className="font-semibold">Dashboard pages</h2><p className="mt-1 text-xs text-[#71817c]">Open and share each interactive portal view.</p></div></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">{portalPages.map((page) => <Link key={page.href} href={page.href} className="glass group flex items-center gap-3 rounded-2xl p-4 transition hover:-translate-y-0.5 hover:shadow-lg"><span className="grid size-10 place-items-center rounded-xl bg-[#e8f3ed] text-[#1f7659]"><page.icon className="size-5" /></span><span className="text-sm font-semibold">{page.label}</span><ChevronRight className="ml-auto size-4 text-[#84928d] transition group-hover:translate-x-0.5" /></Link>)}</div></section>
+      <section className="mb-8"><div className="mb-3 flex items-end justify-between"><div><h2 className="font-semibold">Owner dashboard pages</h2><p className="mt-1 text-xs text-[#71817c]">Live global reporting across every active Retell voice and chat agent.</p></div></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">{portalPages.map((page) => <Link key={page.href} href={page.href} className="glass group flex items-center gap-3 rounded-2xl p-4 transition hover:-translate-y-0.5 hover:shadow-lg"><span className="grid size-10 place-items-center rounded-xl bg-[#e8f3ed] text-[#1f7659]"><page.icon className="size-5" /></span><span className="text-sm font-semibold">{page.label}</span><ChevronRight className="ml-auto size-4 text-[#84928d] transition group-hover:translate-x-0.5" /></Link>)}</div></section>
 
       <header className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.18em] text-[#1f7659]"><ShieldCheck className="size-4" />Daiichi operations</div><h1 className="mt-3 text-4xl font-semibold tracking-[-.05em]">Platform control center</h1><p className="mt-2 text-[#71817c]">Shared Retell workspace, isolated through explicit client assignments.</p></div>
