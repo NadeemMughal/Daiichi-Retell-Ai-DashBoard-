@@ -46,7 +46,7 @@ export function SessionHistoryView({ kind, calls, chats }: { kind: Kind; calls: 
   const safePage = Math.min(page, totalPages);
   const shownRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
   const activeFilters = Number(agent !== "all") + Number(status !== "all") + Number(sentiment !== "all") + Number(Boolean(sessionQuery)) + enabledExtras.filter((key) => extraHasValue(key, extras[key])).length;
-  const tabs = kind === "call" ? ["Base", "Post Call Analysis", "Metadata", "Dynamic Variables"] : ["Base", "Post Chat Analysis"];
+  const tabs = kind === "call" ? ["Base", "Post Call Analysis"] : ["Base", "Post Chat Analysis"];
   const fields = kind === "call" ? ["Agent", "Transfer Agent", "Call ID", "Batch Call ID", "Type", "Duration", "From", "To", "User Sentiment", "Disconnection Reason", "Call Status", "Call Successful"] : ["Agent", "Chat ID", "User Sentiment", "Disconnection Reason", "Chat Successful", "Chat Status"];
 
   function toggle(panel: Exclude<OpenPanel, null>) { setOpenPanel((current) => current === panel ? null : panel); }
