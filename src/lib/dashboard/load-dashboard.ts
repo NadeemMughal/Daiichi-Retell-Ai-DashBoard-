@@ -16,8 +16,8 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const [profileResult, agentsResult, callsResult, chatsResult, membershipsResult] = await Promise.all([
     admin.from("profiles").select("display_name,email").eq("id", context.userId).single(),
     admin.from("retell_agents").select("id,provider_agent_id,display_name,kind,status,provider_updated_at").eq("status", "active").order("display_name"),
-    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
-    admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
+    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
+    admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
     admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").neq("status", "removed")
   ]);
   const failedQuery = [profileResult, agentsResult, callsResult, chatsResult, membershipsResult].find((result) => result.error);
@@ -79,8 +79,8 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   const [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult] = await Promise.all([
     admin.from("tenants").select("display_name").eq("id", context.tenantId).single(),
     admin.from("profiles").select("display_name,email").eq("id", dashboardUserId).single(),
-    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").eq("tenant_id", context.tenantId).gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
-    admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").eq("tenant_id", context.tenantId).gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
+    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").eq("tenant_id", context.tenantId).not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
+    admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").eq("tenant_id", context.tenantId).not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
     admin.from("agent_assignments").select("agent_id,retell_agents(id,provider_agent_id,display_name,kind,status,provider_updated_at)").eq("tenant_id", context.tenantId).is("valid_to", null),
     admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").eq("tenant_id", context.tenantId).neq("status", "removed")
   ]);

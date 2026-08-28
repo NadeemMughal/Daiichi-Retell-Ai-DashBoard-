@@ -36,3 +36,12 @@ export async function listRetellPhoneNumbers() {
     modifiedAt: new Date(number.last_modification_timestamp).toISOString()
   }));
 }
+
+export async function listRetellHistory() {
+  const client = createRetellClient();
+  const [calls, chats] = await Promise.all([
+    client.call.list({ limit: 1000, sort_order: "descending" }),
+    client.chat.list({ limit: 1000, sort_order: "descending" })
+  ]);
+  return { calls: calls.items ?? [], chats: chats.items ?? [] };
+}
