@@ -26,7 +26,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { cn } from "@/lib/cn";
 import { createClient } from "@/lib/supabase/client";
 import { RetellAgentsView, RetellContactsView, RetellPhoneNumbersView } from "./retell-views";
-import { DateRangePicker, type DateRangeValue } from "./date-range-picker";
+import { type DateRangeValue } from "./date-range-picker";
 import { AnalyticsDashboard } from "./analytics-dashboard";
 import { SessionHistoryView } from "./session-history-view";
 
@@ -185,7 +185,6 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
         <div className="mx-auto max-w-[1500px] p-5 md:p-8 xl:p-10">
           <section className="relative z-[80] flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div><p className="mb-2 text-xs font-bold uppercase tracking-[.18em] text-[#1f7659]">Performance command center</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{active === "Home" ? `Welcome, ${dashboard.userName}.` : active}</h1><p className="mt-2 text-sm text-[#687a74]">Live, tenant-isolated Retell reporting for {dashboard.tenantName}.</p></div>
-            {["Call History", "Chat History", "Analytics"].includes(active) && <DateRangePicker value={dateRange} onChange={setDateRange} minimum={reportingMinimum}/>}
           </section>
 
           {active === "Home" ? <>
@@ -223,7 +222,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
               {filteredCalls.length === 0 && <div className="p-10 text-center text-sm text-[#71817c]">No conversations match your search.</div>}
             </div>
           </section>
-          </> : <WorkspacePage active={active} dashboard={dashboard} query={query} dateRange={dateRange} />}
+          </> : <WorkspacePage active={active} dashboard={dashboard} query={query} dateRange={dateRange} onDateRangeChange={setDateRange} reportingMinimum={reportingMinimum} />}
         </div>
       </main>
       {mobileOpen && <button aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm lg:hidden" />}
@@ -235,7 +234,7 @@ function EmptyState({ children }: { children: string }) {
   return <div className="rounded-2xl border border-dashed border-[#173f3325] bg-white/55 p-12 text-center text-sm text-[#71817c]">{children}</div>;
 }
 
-function WorkspacePage({ active: selectedView, dashboard, query, dateRange }: { active: string; dashboard: DashboardDataset; query: string; dateRange: DateRangeValue }) {
+function WorkspacePage({ active: selectedView, dashboard, query, dateRange, onDateRangeChange, reportingMinimum }: { active: string; dashboard: DashboardDataset; query: string; dateRange: DateRangeValue; onDateRangeChange: (value: DateRangeValue) => void; reportingMinimum: string }) {
   const active = ({ Agents: "Voice agents", "Call History": "Calls", "Chat History": "Chat", Analytics: "Reports" } as Record<string, string>)[selectedView] ?? selectedView;
   const rangeStart = new Date(`${dateRange.start}T00:00:00.000Z`).getTime();
   const rangeEnd = new Date(`${dateRange.end}T23:59:59.999Z`).getTime();
@@ -246,10 +245,10 @@ function WorkspacePage({ active: selectedView, dashboard, query, dateRange }: { 
   const chats = dashboard.chats.filter((chat) => inRange(chat.startedAt) && `${chat.agent} ${chat.outcome} ${chat.status}`.toLowerCase().includes(query.toLowerCase()));
   if (selectedView === "Agents") return <section className="mt-8"><RetellAgentsView agents={dashboard.agents}/></section>;
   if (selectedView === "Phone Numbers") return <section className="mt-8"><RetellPhoneNumbersView phoneNumbers={dashboard.phoneNumbers ?? []} agents={dashboard.agents}/></section>;
-  if (selectedView === "Call History") return <section className="mt-8"><SessionHistoryView kind="call" calls={calls} chats={chats}/></section>;
-  if (selectedView === "Chat History") return <section className="mt-8"><SessionHistoryView kind="chat" calls={calls} chats={chats}/></section>;
+  if (selectedView === "Call History") return <section className="mt-8"><SessionHistoryView kind="call" calls={calls} chats={chats} agents={dashboard.agents} dateRange={dateRange} onDateRangeChange={onDateRangeChange} reportingMinimum={reportingMinimum}/></section>;
+  if (selectedView === "Chat History") return <section className="mt-8"><SessionHistoryView kind="chat" calls={calls} chats={chats} agents={dashboard.agents} dateRange={dateRange} onDateRangeChange={onDateRangeChange} reportingMinimum={reportingMinimum}/></section>;
   if (selectedView === "Contacts") return <section className="mt-8"><RetellContactsView calls={calls}/></section>;
-  if (selectedView === "Analytics") return <section className="mt-8"><AnalyticsDashboard calls={calls} chats={chats} agents={dashboard.agents}/></section>;
+  if (selectedView === "Analytics") return <section className="mt-8"><AnalyticsDashboard calls={calls} chats={chats} agents={dashboard.agents} dateRange={dateRange} onDateRangeChange={onDateRangeChange} reportingMinimum={reportingMinimum}/></section>;
   return <section className="mt-8">
     {active === "Voice agents" && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{voiceAgents.map((agent) => <article key={agent.id} className="glass rounded-2xl p-6"><div className="flex items-center gap-4"><div className="grid size-12 place-items-center rounded-2xl bg-[#164f3e] text-white"><Bot className="size-6" /></div><div className="min-w-0"><h2 className="truncate font-semibold">{agent.name}</h2><p className="text-xs capitalize text-[#71817c]">{agent.status} voice agent</p></div></div><div className="mt-6 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Calls</p><p className="mt-1 text-2xl font-semibold">{agent.calls}</p></div><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Completion</p><p className="mt-1 text-2xl font-semibold">{agent.score}</p></div></div></article>)}{!voiceAgents.length && <EmptyState>No assigned voice agents match this workspace.</EmptyState>}</div>}
     {active === "Calls" && <ConversationTable calls={calls} />}
