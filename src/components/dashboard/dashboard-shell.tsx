@@ -103,6 +103,9 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
   const [dateRange, setDateRange] = useState<DateRangeValue>(() => ({
     start: new Date(new Date(`${reportingEnd}T12:00:00Z`).getTime() - 6 * 86_400_000).toISOString().slice(0, 10),
     end: reportingEnd,
+    startTime: "00:00:00",
+    endTime: "23:59:59",
+    utcOffset: "+05:00",
     label: "Last 7 days"
   }));
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -236,8 +239,8 @@ function EmptyState({ children }: { children: string }) {
 
 function WorkspacePage({ active: selectedView, dashboard, query, dateRange, onDateRangeChange, reportingMinimum }: { active: string; dashboard: DashboardDataset; query: string; dateRange: DateRangeValue; onDateRangeChange: (value: DateRangeValue) => void; reportingMinimum: string }) {
   const active = ({ Agents: "Voice agents", "Call History": "Calls", "Chat History": "Chat", Analytics: "Reports" } as Record<string, string>)[selectedView] ?? selectedView;
-  const rangeStart = new Date(`${dateRange.start}T00:00:00.000Z`).getTime();
-  const rangeEnd = new Date(`${dateRange.end}T23:59:59.999Z`).getTime();
+  const rangeStart = new Date(`${dateRange.start}T${dateRange.startTime}${dateRange.utcOffset}`).getTime();
+  const rangeEnd = new Date(`${dateRange.end}T${dateRange.endTime}${dateRange.utcOffset}`).getTime();
   const inRange = (startedAt?: string) => !startedAt || (new Date(startedAt).getTime() >= rangeStart && new Date(startedAt).getTime() <= rangeEnd);
   const voiceAgents = dashboard.agents.filter((agent) => (selectedView === "Agents" || agent.kind === "voice") && agent.name.toLowerCase().includes(query.toLowerCase()));
   const chatAgents = dashboard.agents.filter((agent) => agent.kind === "chat" && agent.name.toLowerCase().includes(query.toLowerCase()));

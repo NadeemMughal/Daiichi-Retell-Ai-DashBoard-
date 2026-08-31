@@ -21,7 +21,8 @@ const portalPages = [
   { label: "Team", href: "/admin/dashboard?view=Team", icon: Users }
 ];
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<{ ownership?: string }> }) {
+  const ownership = (await searchParams).ownership === "unassigned" ? "unassigned" : "all";
   const context = await requireAuthorizationContext();
   requirePermission(context, "tenants.read");
   const admin = createAdminClient();
@@ -38,8 +39,8 @@ export default async function AdminPage() {
   const unassigned = (agents ?? []).filter((agent) => !agent.agent_assignments?.some((assignment) => !assignment.valid_to));
   const cards = [
     { label: "Client organizations", value: tenants?.length ?? 0, icon: Building2, tone: "bg-emerald-50 text-emerald-700", href: "#client-organizations" },
-    { label: "Imported agents", value: agents?.length ?? 0, icon: Bot, tone: "bg-blue-50 text-blue-700", href: "#agent-ownership" },
-    { label: "Unassigned agents", value: unassigned.length, icon: CircleAlert, tone: "bg-amber-50 text-amber-700", href: "#agent-ownership" },
+    { label: "Imported agents", value: agents?.length ?? 0, icon: Bot, tone: "bg-blue-50 text-blue-700", href: "/admin?ownership=all#agent-ownership" },
+    { label: "Unassigned agents", value: unassigned.length, icon: CircleAlert, tone: "bg-amber-50 text-amber-700", href: "/admin?ownership=unassigned#agent-ownership" },
     { label: "Webhook exceptions", value: pendingEvents ?? 0, icon: Webhook, tone: "bg-rose-50 text-rose-700", href: "#webhook-exceptions" }
   ];
   const accessUsers = (memberships ?? []).map((membership) => {
@@ -81,7 +82,7 @@ export default async function AdminPage() {
       <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards.map((card) => <Link key={card.label} href={card.href} className="glass group rounded-2xl p-5 transition hover:-translate-y-0.5 hover:shadow-xl"><div className="flex items-start justify-between"><div className={`grid size-10 place-items-center rounded-xl ${card.tone}`}><card.icon className="size-5" /></div><ChevronRight className="size-5 text-[#84928d] transition group-hover:translate-x-1" /></div><p className="mt-5 text-sm text-[#71817c]">{card.label}</p><p className="mt-1 text-3xl font-semibold">{card.value}</p><p className="mt-2 text-xs font-semibold text-[#1f7659]">View details</p></Link>)}</section>
 
       <section id="agent-ownership" className="target-panel mt-5 scroll-mt-6 grid gap-5 rounded-2xl xl:grid-cols-[1.4fr_1fr]">
-        <AgentOwnershipList agents={ownershipAgents} workspaces={(tenants ?? []).map((tenant) => ({ id: tenant.id, name: tenant.display_name }))}/>
+        <AgentOwnershipList key={ownership} initialAssignmentFilter={ownership} agents={ownershipAgents} workspaces={(tenants ?? []).map((tenant) => ({ id: tenant.id, name: tenant.display_name }))}/>
         <div className="space-y-5">
           <article id="client-organizations" className="target-panel glass scroll-mt-6 rounded-2xl p-6"><h2 className="font-semibold">Client dashboards</h2><p className="mt-1 text-xs text-[#71817c]">Open a tenant’s real reporting portal.</p><div className="mt-4 space-y-2">{(tenants ?? []).map((tenant) => <Link key={tenant.id} href={`/${tenant.slug}/overview`} className="flex items-center gap-3 rounded-xl bg-white/70 p-4 transition hover:bg-white"><Building2 className="size-5 text-[#1f7659]" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{tenant.display_name}</span><span className="text-xs capitalize text-[#84928d]">{tenant.status}</span></span><ChevronRight className="size-4 text-[#71817c]" /></Link>)}{!tenants?.length && <div className="rounded-xl border border-dashed border-[#173f3320] p-5 text-sm text-[#71817c]">No client workspace exists yet. The portal preview is available above; real pages appear here after a tenant is created.</div>}</div></article>
           <article className="glass rounded-2xl p-6"><h2 className="font-semibold">Operations checklist</h2><div className="mt-5 space-y-3">{[{ label: "Tenant boundary", value: "RLS + server checks", icon: ShieldCheck }, { label: "Manual invoices open", value: String(invoiceCount ?? 0), icon: FileText }, { label: "Webhook queue", value: `${pendingEvents ?? 0} exceptions`, icon: Webhook }].map((item) => <div key={item.label} className="flex items-center gap-3 rounded-xl bg-white/70 p-4"><item.icon className="size-5 text-[#1f7659]"/><div><p className="text-sm font-semibold">{item.label}</p><p className="text-xs text-[#84928d]">{item.value}</p></div></div>)}</div></article>
