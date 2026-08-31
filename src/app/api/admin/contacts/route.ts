@@ -6,6 +6,8 @@ import { createRetellClient } from "@/lib/retell/client";
 const requestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("backfill"), attributes: z.array(z.string().min(1).max(100)).min(1).max(50) }),
   z.object({ action: z.literal("add_field"), name: z.string().regex(/^[a-z][a-z0-9_]*$/).max(100), label: z.string().min(1).max(100), fieldType: z.enum(["string", "number", "boolean", "date", "datetime"]) }),
+  z.object({ action: z.literal("update_field"), originalName: z.string().min(1), label: z.string().min(1).max(100), fieldType: z.enum(["string", "number", "boolean", "date", "datetime"]), description: z.string().max(500).optional(), mapPostCall: z.boolean(), analysisDataName: z.string().max(100).optional() }),
+  z.object({ action: z.literal("delete_field"), name: z.string().min(1) }),
   z.object({
     action: z.literal("create"),
     phoneNumber: z.string().regex(/^\+[1-9]\d{7,14}$/),
@@ -54,6 +56,22 @@ export async function POST(request: Request) {
       if ((config.custom_fields ?? []).some((field) => field.name === fieldRequest.name)) return NextResponse.json({ error: "CONTACT_FIELD_ALREADY_EXISTS" }, { status: 409 });
       await client.crm.updateConfig({ custom_fields: [...(config.custom_fields ?? []), { name: fieldRequest.name, label: fieldRequest.label, type: fieldRequest.fieldType }] });
       return NextResponse.json({ ok: true, message: "Contact field added to Retell." }, { status: 201 });
+    }
+    if (parsed.data.action === "update_field") {
+      const request = parsed.data;
+      const config = await client.crm.getConfig();
+      const customFields = (config.custom_fields ?? []).map((field) => field.name === request.originalName ? { ...field, label: request.label, type: request.fieldType, description: request.description || undefined } : field);
+      const mappings = (config.crm_analysis_data_mappings ?? []).filter((mapping) => mapping.field_name !== request.originalName);
+      if (request.mapPostCall && request.analysisDataName) mappings.push({ field_name: request.originalName, analysis_data_name: request.analysisDataName, update_mode: "overwrite" });
+      await client.crm.updateConfig({ custom_fields: customFields, crm_analysis_data_mappings: mappings });
+      return NextResponse.json({ ok: true, message: "Contact field updated in Retell." });
+    }
+    if (parsed.data.action === "delete_field") {
+      const request = parsed.data;
+      if (["phone_number", "first_name", "last_name", "do_not_call"].includes(request.name)) return NextResponse.json({ error: "BUILT_IN_FIELD_CANNOT_BE_DELETED" }, { status: 409 });
+      const config = await client.crm.getConfig();
+      await client.crm.updateConfig({ custom_fields: (config.custom_fields ?? []).filter((field) => field.name !== request.name), crm_analysis_data_mappings: (config.crm_analysis_data_mappings ?? []).filter((mapping) => mapping.field_name !== request.name) });
+      return NextResponse.json({ ok: true, message: "Contact field deleted from Retell." });
     }
     const contact = await client.contact.create({
       phone_number: parsed.data.phoneNumber,
