@@ -1,5 +1,5 @@
 export const permissions = [
-  "platform.manage", "tenants.read", "tenants.manage", "members.read", "members.manage",
+  "super_admin.manage", "platform.manage", "tenants.read", "tenants.manage", "members.read", "members.manage",
   "agents.read", "agents.manage", "calls.read", "calls.initiate", "chats.read", "chats.respond",
   "transcripts.read", "recordings.play", "recordings.download", "contacts.view_unmasked",
   "analytics.read", "reports.export", "billing.read", "billing.manage",
@@ -12,6 +12,7 @@ export type TenantRole = "owner" | "admin" | "manager" | "analyst" | "billing" |
 export type EffectiveRole = "super_admin" | "admin" | "client";
 
 const everyPermission: readonly Permission[] = permissions;
+const adminPermissions: readonly Permission[] = permissions.filter((permission) => permission !== "super_admin.manage");
 const clientPermissions: readonly Permission[] = [
   "tenants.read", "members.read", "agents.read", "calls.read", "calls.initiate",
   "chats.read", "chats.respond", "analytics.read", "reports.export"
@@ -24,7 +25,7 @@ export function effectiveRole(platformRoles: readonly PlatformRole[], tenantRole
   return tenantRole ? "client" : null;
 }
 
-export function permissionsForPlatformRole(role: PlatformRole) { void role; return everyPermission; }
+export function permissionsForPlatformRole(role: PlatformRole) { return role === "super_admin" ? everyPermission : adminPermissions; }
 export function permissionsForTenantRole(role: TenantRole) { void role; return clientPermissions; }
 
 const dashboardViewPermissions = [

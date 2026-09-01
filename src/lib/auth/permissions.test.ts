@@ -9,10 +9,16 @@ describe("three-role authorization model", () => {
     expect(permissionsForPlatformRole("super_admin")).toEqual(permissions);
   });
 
-  it("maps every active non-super platform role to full Admin access", () => {
+  it("reserves Super Admin account control for Super Admin", () => {
+    expect(permissionsForPlatformRole("super_admin")).toContain("super_admin.manage");
+    expect(permissionsForPlatformRole("operations_admin")).not.toContain("super_admin.manage");
+  });
+
+  it("gives Admin full operational access without Super Admin control", () => {
     for (const role of ["operations_admin", "agent_engineer", "quality_analyst", "support", "billing_admin", "auditor"] as const) {
       expect(effectiveRole([role], null)).toBe("admin");
-      expect(permissionsForPlatformRole(role)).toEqual(permissions);
+      expect(permissionsForPlatformRole(role)).toContain("platform.manage");
+      expect(permissionsForPlatformRole(role)).not.toContain("super_admin.manage");
     }
   });
 

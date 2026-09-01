@@ -16,7 +16,7 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const [profileResult, agentsResult, callsResult, chatsResult, membershipsResult] = await Promise.all([
     admin.from("profiles").select("display_name,email").eq("id", context.userId).single(),
     admin.from("retell_agents").select("id,provider_agent_id,display_name,kind,status,provider_version,provider_updated_at").eq("status", "active").order("display_name"),
-    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,contact_unmasked,provider_cost_minor,disconnection_reason,sentiment").not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
+    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
     admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
     admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").neq("status", "removed")
   ]);
@@ -27,7 +27,13 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const phoneNumbers = await listRetellPhoneNumbers().catch(() => []);
   const activeAgentIds = new Set(agents.map((agent) => agent.id));
   const callRows = (callsResult.data ?? []).filter((call) => activeAgentIds.has(call.agent_id));
-  for (const call of callRows) call.contact_masked = call.contact_unmasked ?? call.contact_masked;
+  if (callRows.length) {
+    const unmasked = await admin.from("calls").select("id,contact_unmasked").in("id", callRows.map((call) => call.id));
+    if (!unmasked.error) {
+      const contacts = new Map((unmasked.data ?? []).map((call) => [call.id, call.contact_unmasked]));
+      for (const call of callRows) call.contact_masked = contacts.get(call.id) ?? call.contact_masked;
+    }
+  }
   const chatRows = (chatsResult.data ?? []).filter((chat) => activeAgentIds.has(chat.agent_id));
   const chartStart = new Date(); chartStart.setUTCDate(chartStart.getUTCDate() - 6); chartStart.setUTCHours(0, 0, 0, 0);
   const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(chartStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
@@ -87,7 +93,7 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   const [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult] = await Promise.all([
     admin.from("tenants").select("display_name").eq("id", context.tenantId).single(),
     admin.from("profiles").select("display_name,email").eq("id", dashboardUserId).single(),
-    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,contact_unmasked,provider_cost_minor,disconnection_reason,sentiment").eq("tenant_id", context.tenantId).not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
+    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").eq("tenant_id", context.tenantId).not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
     admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").eq("tenant_id", context.tenantId).not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
     admin.from("agent_assignments").select("agent_id,retell_agents(id,provider_agent_id,display_name,kind,status,provider_version,provider_updated_at)").eq("tenant_id", context.tenantId).is("valid_to", null),
     admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").eq("tenant_id", context.tenantId).neq("status", "removed")
@@ -106,7 +112,13 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   if (accessResult?.error) throw new Error(`Dashboard access unavailable: ${accessResult.error.code}`);
   const allowedAgentIds = new Set(context.platformRoles.length && !viewingAnotherUser ? tenantAgentIds : (accessResult?.data ?? []).map((grant) => grant.agent_id));
   const callRows = (calls ?? []).filter((call) => allowedAgentIds.has(call.agent_id));
-  if (dashboardPermissions.has("contacts.view_unmasked")) for (const call of callRows) call.contact_masked = call.contact_unmasked ?? call.contact_masked;
+  if (dashboardPermissions.has("contacts.view_unmasked") && callRows.length) {
+    const unmasked = await admin.from("calls").select("id,contact_unmasked").in("id", callRows.map((call) => call.id));
+    if (!unmasked.error) {
+      const contacts = new Map((unmasked.data ?? []).map((call) => [call.id, call.contact_unmasked]));
+      for (const call of callRows) call.contact_masked = contacts.get(call.id) ?? call.contact_masked;
+    }
+  }
   const chatRows = (chats ?? []).filter((chat) => allowedAgentIds.has(chat.agent_id));
   const chartStart = new Date(); chartStart.setUTCDate(chartStart.getUTCDate() - 6); chartStart.setUTCHours(0, 0, 0, 0);
   const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(chartStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
