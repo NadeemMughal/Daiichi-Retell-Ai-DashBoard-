@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 const callSchema = z.object({
   call_id: z.string(), agent_id: z.string(), call_status: z.string(), direction: z.string().optional(),
   start_timestamp: z.number().optional(), end_timestamp: z.number().optional(), duration_ms: z.number().optional(),
-  disconnection_reason: z.string().optional(), transcript: z.string().optional(), recording_url: z.string().optional(), scrubbed_recording_url: z.string().optional(),
+  disconnection_reason: z.string().optional(), from_number: z.string().optional(), to_number: z.string().optional(), transcript: z.string().optional(), recording_url: z.string().optional(), scrubbed_recording_url: z.string().optional(),
   call_analysis: z.object({ call_summary: z.string().optional(), user_sentiment: z.string().optional(), call_successful: z.boolean().optional(), custom_analysis_data: z.record(z.string(), z.unknown()).optional() }).optional(),
   call_cost: z.object({ combined_cost: z.number().optional() }).passthrough().optional()
 }).passthrough();
@@ -26,7 +26,7 @@ async function assignmentForProviderAgent(providerAgentId: string) {
   if (!agent) return null;
   const { data: assignment } = await admin.from("agent_assignments").select("tenant_id").eq("agent_id", agent.id).is("valid_to", null).maybeSingle();
   if (!assignment) return null;
-  const { data: tenant } = await admin.from("tenants").select("transcript_access_enabled,recording_access_enabled").eq("id", assignment.tenant_id).single();
+  const { data: tenant } = await admin.from("tenants").select("transcript_access_enabled,recording_access_enabled,contact_masking_enabled").eq("id", assignment.tenant_id).single();
   return { agent, tenantId: assignment.tenant_id, tenant };
 }
 
@@ -44,7 +44,7 @@ export async function processRetellWebhookEvent(eventId: string, eventType: stri
       const synchronized = await admin.from("calls").upsert({
         tenant_id: context.tenantId, connection_id: context.agent.connection_id, agent_id: context.agent.id, provider_call_id: call.call_id,
         status: call.call_status, direction: call.direction, started_at: timestamp(call.start_timestamp), ended_at: timestamp(call.end_timestamp), duration_ms: call.duration_ms,
-        disconnection_reason: call.disconnection_reason, contact_masked: "Protected caller", summary: call.call_analysis?.call_summary, sentiment: call.call_analysis?.user_sentiment,
+        disconnection_reason: call.disconnection_reason, contact_masked: "Protected caller", contact_unmasked: context.tenant?.contact_masking_enabled ? null : (call.direction === "outbound" ? call.to_number : call.from_number) ?? null, summary: call.call_analysis?.call_summary, sentiment: call.call_analysis?.user_sentiment,
         outcome: typeof custom?.outcome === "string" ? custom.outcome : call.call_analysis?.call_successful === true ? "Successful" : call.call_analysis?.call_successful === false ? "Unsuccessful" : null,
         transcript_text: context.tenant?.transcript_access_enabled ? call.transcript : null,
         recording_locator: context.tenant?.recording_access_enabled ? call.scrubbed_recording_url ?? call.recording_url : null,

@@ -2,7 +2,7 @@ import "server-only";
 import { notFound } from "next/navigation";
 import type { DashboardDataset } from "@/components/dashboard/dashboard-shell";
 import { requireAuthorizationContext, requirePermission } from "@/lib/auth/context";
-import { permissionsForTenantRole, type Permission, type TenantRole } from "@/lib/auth/permissions";
+import { applyPermissionOverrides, applyTenantDataFlags, dashboardViewsForPermissions, permissionsForTenantRole, type TenantRole } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { listRetellPhoneNumbers } from "@/lib/retell/client";
 
@@ -10,13 +10,13 @@ function dayKey(date: Date) { return date.toISOString().slice(0, 10); }
 
 export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const context = await requireAuthorizationContext();
-  requirePermission(context, "agents.read");
+  requirePermission(context, "platform.manage");
   const admin = createAdminClient();
   const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 29); periodStart.setUTCHours(0, 0, 0, 0);
   const [profileResult, agentsResult, callsResult, chatsResult, membershipsResult] = await Promise.all([
     admin.from("profiles").select("display_name,email").eq("id", context.userId).single(),
-    admin.from("retell_agents").select("id,provider_agent_id,display_name,kind,status,provider_updated_at").eq("status", "active").order("display_name"),
-    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
+    admin.from("retell_agents").select("id,provider_agent_id,display_name,kind,status,provider_version,provider_updated_at").eq("status", "active").order("display_name"),
+    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,contact_unmasked,provider_cost_minor,disconnection_reason,sentiment").not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
     admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
     admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").neq("status", "removed")
   ]);
@@ -27,6 +27,7 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const phoneNumbers = await listRetellPhoneNumbers().catch(() => []);
   const activeAgentIds = new Set(agents.map((agent) => agent.id));
   const callRows = (callsResult.data ?? []).filter((call) => activeAgentIds.has(call.agent_id));
+  for (const call of callRows) call.contact_masked = call.contact_unmasked ?? call.contact_masked;
   const chatRows = (chatsResult.data ?? []).filter((chat) => activeAgentIds.has(chat.agent_id));
   const chartStart = new Date(); chartStart.setUTCDate(chartStart.getUTCDate() - 6); chartStart.setUTCHours(0, 0, 0, 0);
   const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(chartStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
@@ -40,7 +41,7 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
     const kind = agent.kind as "voice" | "chat";
     const completed = kind === "chat" ? chatRows.filter((chat) => chat.agent_id === agent.id && /ended|analyzed/i.test(chat.status)).length : callRows.filter((call) => call.agent_id === agent.id && /ended|analyzed/i.test(call.status)).length;
     const volume = kind === "chat" ? chatCount : callCount;
-    return { id: agent.id, providerId: agent.provider_agent_id, name: agent.display_name, kind, calls: callCount, chats: chatCount, score: volume ? `${Math.round(completed / volume * 100)}%` : "—", status: agent.status, modifiedAt: agent.provider_updated_at ?? undefined };
+    return { id: agent.id, providerId: agent.provider_agent_id, version: agent.provider_version ?? undefined, name: agent.display_name, kind, calls: callCount, chats: chatCount, score: volume ? `${Math.round(completed / volume * 100)}%` : "—", status: agent.status, modifiedAt: agent.provider_updated_at ?? undefined };
   });
   return {
     tenantName: "Daiichi Technologies",
@@ -56,8 +57,10 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
     chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Retell agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status, sessionId: chat.provider_chat_id, cost: chat.provider_cost_minor == null ? "—" : `$${(Number(chat.provider_cost_minor) / 100).toFixed(3)}`, sentiment: chat.sentiment ?? undefined })),
     team: (membershipsResult.data ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }),
     lastSyncedAt: new Date().toISOString(),
-    allowedViews: ["Home", "Agents", "Phone Numbers", "Call History", "Chat History", "Contacts", "Analytics", "Team"],
-    phoneNumbers
+    allowedViews: dashboardViewsForPermissions(context.permissions),
+    phoneNumbers,
+    permissions: [...context.permissions],
+    effectiveRole: context.effectiveRole ?? "admin"
   };
 }
 
@@ -70,18 +73,23 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   let dashboardPermissions = context.permissions;
   if (effectiveUserId && effectiveUserId !== context.userId) {
     requirePermission(context, "members.manage");
-    const { data: targetMembership } = await admin.from("tenant_memberships").select("role").eq("tenant_id", context.tenantId).eq("user_id", effectiveUserId).eq("status", "active").maybeSingle();
+    const { data: targetMembership } = await admin.from("tenant_memberships").select("id,role").eq("tenant_id", context.tenantId).eq("user_id", effectiveUserId).eq("status", "active").maybeSingle();
     if (!targetMembership) notFound();
     dashboardUserId = effectiveUserId;
-    dashboardPermissions = new Set<Permission>(permissionsForTenantRole(targetMembership.role as TenantRole));
+    const [{ data: overrides }, { data: tenantFlags }] = await Promise.all([
+      admin.from("membership_permission_overrides").select("permission,allowed").eq("membership_id", targetMembership.id),
+      admin.from("tenants").select("transcript_access_enabled,recording_access_enabled,recording_download_enabled,contact_masking_enabled").eq("id", context.tenantId).single()
+    ]);
+    dashboardPermissions = applyPermissionOverrides(permissionsForTenantRole(targetMembership.role as TenantRole), overrides ?? []);
+    if (tenantFlags) dashboardPermissions = applyTenantDataFlags(dashboardPermissions, { transcriptAccessEnabled: tenantFlags.transcript_access_enabled, recordingAccessEnabled: tenantFlags.recording_access_enabled, recordingDownloadEnabled: tenantFlags.recording_download_enabled, contactMaskingEnabled: tenantFlags.contact_masking_enabled });
   }
   const periodStart = new Date(); periodStart.setUTCDate(periodStart.getUTCDate() - 29); periodStart.setUTCHours(0, 0, 0, 0);
   const [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult] = await Promise.all([
     admin.from("tenants").select("display_name").eq("id", context.tenantId).single(),
     admin.from("profiles").select("display_name,email").eq("id", dashboardUserId).single(),
-    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").eq("tenant_id", context.tenantId).not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
+    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,contact_unmasked,provider_cost_minor,disconnection_reason,sentiment").eq("tenant_id", context.tenantId).not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
     admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").eq("tenant_id", context.tenantId).not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
-    admin.from("agent_assignments").select("agent_id,retell_agents(id,provider_agent_id,display_name,kind,status,provider_updated_at)").eq("tenant_id", context.tenantId).is("valid_to", null),
+    admin.from("agent_assignments").select("agent_id,retell_agents(id,provider_agent_id,display_name,kind,status,provider_version,provider_updated_at)").eq("tenant_id", context.tenantId).is("valid_to", null),
     admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").eq("tenant_id", context.tenantId).neq("status", "removed")
   ]);
   const failedQuery = [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult].find((result) => result.error);
@@ -98,6 +106,7 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   if (accessResult?.error) throw new Error(`Dashboard access unavailable: ${accessResult.error.code}`);
   const allowedAgentIds = new Set(context.platformRoles.length && !viewingAnotherUser ? tenantAgentIds : (accessResult?.data ?? []).map((grant) => grant.agent_id));
   const callRows = (calls ?? []).filter((call) => allowedAgentIds.has(call.agent_id));
+  if (dashboardPermissions.has("contacts.view_unmasked")) for (const call of callRows) call.contact_masked = call.contact_unmasked ?? call.contact_masked;
   const chatRows = (chats ?? []).filter((chat) => allowedAgentIds.has(chat.agent_id));
   const chartStart = new Date(); chartStart.setUTCDate(chartStart.getUTCDate() - 6); chartStart.setUTCHours(0, 0, 0, 0);
   const days = Array.from({ length: 7 }, (_, offset) => { const date = new Date(chartStart); date.setUTCDate(date.getUTCDate() + offset); return date; });
@@ -112,20 +121,11 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
     const kind = (relation?.kind ?? "voice") as "voice" | "chat";
     const completed = kind === "chat" ? chatRows.filter((chat) => chat.agent_id === assignment.agent_id && /ended|analyzed/i.test(chat.status)).length : callRows.filter((call) => call.agent_id === assignment.agent_id && /ended|analyzed/i.test(call.status)).length;
     const volume = kind === "chat" ? chatCount : callCount;
-    return { id: relation?.id ?? assignment.agent_id, providerId: relation?.provider_agent_id, name: relation?.display_name ?? "Assigned agent", kind, calls: callCount, chats: chatCount, score: volume ? `${Math.round(completed / volume * 100)}%` : "—", status: relation?.status ?? "inactive", modifiedAt: relation?.provider_updated_at ?? undefined };
+    return { id: relation?.id ?? assignment.agent_id, providerId: relation?.provider_agent_id, version: relation?.provider_version ?? undefined, name: relation?.display_name ?? "Assigned agent", kind, calls: callCount, chats: chatCount, score: volume ? `${Math.round(completed / volume * 100)}%` : "—", status: relation?.status ?? "inactive", modifiedAt: relation?.provider_updated_at ?? undefined };
   });
   const visibleProviderIds = new Set(agentRows.map((agent) => agent.providerId).filter((id): id is string => Boolean(id)));
   const phoneNumbers = (await listRetellPhoneNumbers().catch(() => [])).filter((number) => [...number.inboundAgentIds, ...number.outboundAgentIds].some((id) => visibleProviderIds.has(id)));
-  const allowedViews = [
-    dashboardPermissions.has("analytics.read") && "Home",
-    dashboardPermissions.has("agents.read") && "Agents",
-    dashboardPermissions.has("agents.read") && "Phone Numbers",
-    dashboardPermissions.has("calls.read") && "Call History",
-    dashboardPermissions.has("chats.read") && "Chat History",
-    dashboardPermissions.has("calls.read") && "Contacts",
-    dashboardPermissions.has("analytics.read") && "Analytics",
-    dashboardPermissions.has("members.read") && "Team"
-  ].filter((view): view is string => Boolean(view));
+  const allowedViews = dashboardViewsForPermissions(dashboardPermissions);
   if (!allowedViews.length) notFound();
   return {
     tenantName: tenant?.display_name ?? "Client workspace",
@@ -142,6 +142,8 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
     team: dashboardPermissions.has("members.read") ? (memberships ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }) : [],
     lastSyncedAt: new Date().toISOString(),
     allowedViews,
-    phoneNumbers
+    phoneNumbers,
+    permissions: [...dashboardPermissions],
+    effectiveRole: context.platformRoles.length && !viewingAnotherUser ? (context.effectiveRole ?? "admin") : "client"
   };
 }

@@ -1,63 +1,63 @@
 export const permissions = [
-  "platform.manage",
-  "tenants.read",
-  "tenants.manage",
-  "members.read",
-  "members.manage",
-  "agents.read",
-  "agents.manage",
-  "calls.read",
-  "calls.initiate",
-  "chats.read",
-  "chats.respond",
-  "transcripts.read",
-  "recordings.play",
-  "recordings.download",
-  "contacts.view_unmasked",
-  "analytics.read",
-  "reports.export",
-  "billing.read",
-  "billing.manage",
-  "retell_connections.manage",
-  "reconciliation.manage",
-  "audit.read"
+  "platform.manage", "tenants.read", "tenants.manage", "members.read", "members.manage",
+  "agents.read", "agents.manage", "calls.read", "calls.initiate", "chats.read", "chats.respond",
+  "transcripts.read", "recordings.play", "recordings.download", "contacts.view_unmasked",
+  "analytics.read", "reports.export", "billing.read", "billing.manage",
+  "retell_connections.manage", "reconciliation.manage", "audit.read"
 ] as const;
 
 export type Permission = (typeof permissions)[number];
 export type PlatformRole = "super_admin" | "operations_admin" | "agent_engineer" | "quality_analyst" | "support" | "billing_admin" | "auditor";
 export type TenantRole = "owner" | "admin" | "manager" | "analyst" | "billing" | "viewer";
+export type EffectiveRole = "super_admin" | "admin" | "client";
 
-const platformRolePermissions: Record<PlatformRole, readonly Permission[]> = {
-  super_admin: permissions,
-  operations_admin: ["tenants.read", "tenants.manage", "members.read", "members.manage", "agents.read", "agents.manage", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "reports.export", "retell_connections.manage", "reconciliation.manage", "audit.read"],
-  agent_engineer: ["tenants.read", "agents.read", "agents.manage", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read"],
-  quality_analyst: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "reports.export"],
-  support: ["tenants.read", "members.read", "agents.read", "calls.read", "chats.read", "analytics.read"],
-  billing_admin: ["tenants.read", "billing.read", "billing.manage", "analytics.read", "audit.read"],
-  auditor: ["tenants.read", "agents.read", "analytics.read", "billing.read", "audit.read"]
-};
+const everyPermission: readonly Permission[] = permissions;
+const clientPermissions: readonly Permission[] = [
+  "tenants.read", "members.read", "agents.read", "calls.read", "calls.initiate",
+  "chats.read", "chats.respond", "analytics.read", "reports.export"
+];
+const clientOverrideablePermissions = new Set<Permission>([...clientPermissions, "transcripts.read", "recordings.play", "recordings.download", "contacts.view_unmasked"]);
 
-const tenantRolePermissions: Record<TenantRole, readonly Permission[]> = {
-  owner: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "billing.read"],
-  admin: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read", "billing.read"],
-  manager: ["tenants.read", "agents.read", "calls.read", "chats.read", "transcripts.read", "recordings.play", "analytics.read"],
-  analyst: ["tenants.read", "agents.read", "calls.read", "chats.read", "analytics.read"],
-  billing: ["tenants.read", "billing.read"],
-  viewer: ["tenants.read", "agents.read", "calls.read", "calls.initiate", "chats.read", "chats.respond", "analytics.read"]
-};
-
-export function permissionsForPlatformRole(role: PlatformRole) {
-  return platformRolePermissions[role];
+export function effectiveRole(platformRoles: readonly PlatformRole[], tenantRole: TenantRole | null): EffectiveRole | null {
+  if (platformRoles.includes("super_admin")) return "super_admin";
+  if (platformRoles.length) return "admin";
+  return tenantRole ? "client" : null;
 }
 
-export function permissionsForTenantRole(role: TenantRole) {
-  return tenantRolePermissions[role];
+export function permissionsForPlatformRole(role: PlatformRole) { void role; return everyPermission; }
+export function permissionsForTenantRole(role: TenantRole) { void role; return clientPermissions; }
+
+const dashboardViewPermissions = [
+  ["Home", "analytics.read"], ["Agents", "agents.read"], ["Phone Numbers", "agents.read"],
+  ["Call History", "calls.read"], ["Chat History", "chats.read"], ["Contacts", "calls.read"],
+  ["Analytics", "analytics.read"], ["Team", "members.read"]
+] as const satisfies ReadonlyArray<readonly [string, Permission]>;
+
+export function dashboardViewsForPermissions(granted: ReadonlySet<Permission>) {
+  return dashboardViewPermissions.filter(([, permission]) => granted.has(permission)).map(([view]) => view);
 }
 
-export function applicablePlatformRoles(
-  assignments: ReadonlyArray<{ role: string; scope_tenant_id: string | null }>,
-  tenantId?: string
-) {
+export function applyPermissionOverrides(base: Iterable<Permission>, overrides: ReadonlyArray<{ permission: string; allowed: boolean }>, ceiling: ReadonlySet<Permission> = clientOverrideablePermissions) {
+  const result = new Set<Permission>(base);
+  const known = new Set<string>(permissions);
+  for (const override of overrides) {
+    if (!known.has(override.permission) || !ceiling.has(override.permission as Permission)) continue;
+    const permission = override.permission as Permission;
+    if (override.allowed) result.add(permission); else result.delete(permission);
+  }
+  return result;
+}
+
+export function applyTenantDataFlags(base: Iterable<Permission>, flags: { transcriptAccessEnabled: boolean; recordingAccessEnabled: boolean; recordingDownloadEnabled: boolean; contactMaskingEnabled: boolean }) {
+  const result = new Set(base);
+  if (!flags.transcriptAccessEnabled) result.delete("transcripts.read");
+  if (!flags.recordingAccessEnabled) { result.delete("recordings.play"); result.delete("recordings.download"); }
+  if (!flags.recordingDownloadEnabled) result.delete("recordings.download");
+  if (flags.contactMaskingEnabled) result.delete("contacts.view_unmasked");
+  return result;
+}
+
+export function applicablePlatformRoles(assignments: ReadonlyArray<{ role: string; scope_tenant_id: string | null }>, tenantId?: string) {
   return assignments
     .filter((assignment) => tenantId === undefined ? assignment.scope_tenant_id === null : assignment.scope_tenant_id === null || assignment.scope_tenant_id === tenantId)
     .map((assignment) => assignment.role as PlatformRole);

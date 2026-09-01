@@ -71,11 +71,13 @@ export type DashboardDataset = {
   metrics: typeof previewMetrics;
   chart: typeof previewChartData;
   calls: Array<{ contact: string; number: string; agentId?: string; agent: string; outcome: string; duration: string; time: string; startedAt?: string; tone: string; sessionId?: string; channel?: string; cost?: string; endReason?: string; sentiment?: string; status?: string }>;
-  agents: Array<{ id: string; providerId?: string; name: string; kind: "voice" | "chat"; calls: number; chats: number; score: string; status: string; modifiedAt?: string }>;
+  agents: Array<{ id: string; providerId?: string; version?: number; name: string; kind: "voice" | "chat"; calls: number; chats: number; score: string; status: string; modifiedAt?: string }>;
   chats: Array<{ id: string; agentId?: string; agent: string; outcome: string; messages: number; time: string; startedAt?: string; status: string; sessionId?: string; cost?: string; sentiment?: string }>;
   team: Array<{ name: string; email: string; role: string; status: string }>;
   lastSyncedAt: string;
   allowedViews: string[];
+  permissions: string[];
+  effectiveRole: "super_admin" | "admin" | "client";
   phoneNumbers?: Array<{ number: string; prettyNumber: string; nickname: string; type: string; inboundAgentIds: string[]; outboundAgentIds: string[]; modifiedAt: string }>;
 };
 
@@ -88,7 +90,7 @@ const previewAgents = [
 ];
 
 export function DashboardShell({ preview = false, data, initialView = "Overview" }: { preview?: boolean; data?: DashboardDataset; initialView?: string }) {
-  const dashboard: DashboardDataset = data ?? { tenantName: "Daiichi Automotive", userName: "Nadeem", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString(), allowedViews: nav.map((item) => item.label) };
+  const dashboard: DashboardDataset = data ?? { tenantName: "Daiichi Automotive", userName: "Nadeem", metrics: previewMetrics, chart: previewChartData, calls: previewCalls, agents: previewAgents, chats: [], team: [], lastSyncedAt: new Date().toISOString(), allowedViews: nav.map((item) => item.label), permissions: ["reports.export"], effectiveRole: "client" };
   const router = useRouter();
   const visibleNav = nav.filter((item) => dashboard.allowedViews.includes(item.label));
   const normalizedInitialView = ({ Overview: "Home", "Voice agents": "Agents", Calls: "Call History", Chat: "Chat History", Reports: "Analytics" } as Record<string, string>)[initialView] ?? initialView;
@@ -166,7 +168,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
             <Link href="/admin" className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-white/65 hover:bg-white/8 hover:text-white"><Settings className="size-[18px]" />Back to operations</Link>
             <div className="mt-3 flex items-center gap-3 rounded-xl px-3 py-3">
               <div className="grid size-9 place-items-center rounded-full bg-[#d7f55b] text-xs font-black text-[#123e32]">{dashboard.userName.slice(0, 2).toUpperCase()}</div>
-              <div><p className="text-sm font-medium">{dashboard.userName}</p><p className="text-xs text-white/45">Workspace user</p></div>
+              <div><p className="text-sm font-medium">{dashboard.userName}</p><p className="text-xs capitalize text-white/45">{dashboard.effectiveRole.replace("_", " ")}</p></div>
             </div>
           </div>
         </div>
@@ -248,9 +250,9 @@ function WorkspacePage({ active: selectedView, dashboard, query, dateRange, onDa
   const chats = dashboard.chats.filter((chat) => inRange(chat.startedAt) && `${chat.agent} ${chat.outcome} ${chat.status}`.toLowerCase().includes(query.toLowerCase()));
   if (selectedView === "Agents") return <section className="mt-8"><RetellAgentsView agents={dashboard.agents}/></section>;
   if (selectedView === "Phone Numbers") return <section className="mt-8"><RetellPhoneNumbersView phoneNumbers={dashboard.phoneNumbers ?? []} agents={dashboard.agents}/></section>;
-  if (selectedView === "Call History") return <section className="mt-8"><SessionHistoryView kind="call" calls={calls} chats={chats} agents={dashboard.agents} dateRange={dateRange} onDateRangeChange={onDateRangeChange} reportingMinimum={reportingMinimum}/></section>;
-  if (selectedView === "Chat History") return <section className="mt-8"><SessionHistoryView kind="chat" calls={calls} chats={chats} agents={dashboard.agents} dateRange={dateRange} onDateRangeChange={onDateRangeChange} reportingMinimum={reportingMinimum}/></section>;
-  if (selectedView === "Contacts") return <section className="mt-8"><RetellContactsView calls={calls}/></section>;
+  if (selectedView === "Call History") return <section className="mt-8"><SessionHistoryView kind="call" calls={calls} chats={chats} agents={dashboard.agents} canExport={dashboard.permissions.includes("reports.export")} dateRange={dateRange} onDateRangeChange={onDateRangeChange} reportingMinimum={reportingMinimum}/></section>;
+  if (selectedView === "Chat History") return <section className="mt-8"><SessionHistoryView kind="chat" calls={calls} chats={chats} agents={dashboard.agents} canExport={dashboard.permissions.includes("reports.export")} dateRange={dateRange} onDateRangeChange={onDateRangeChange} reportingMinimum={reportingMinimum}/></section>;
+  if (selectedView === "Contacts") return <section className="mt-8"><RetellContactsView calls={calls} canManage={dashboard.permissions.includes("retell_connections.manage")} canExport={dashboard.permissions.includes("reports.export")}/></section>;
   if (selectedView === "Analytics") return <section className="mt-8"><AnalyticsDashboard calls={calls} chats={chats} agents={dashboard.agents} dateRange={dateRange} onDateRangeChange={onDateRangeChange} reportingMinimum={reportingMinimum}/></section>;
   return <section className="mt-8">
     {active === "Voice agents" && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{voiceAgents.map((agent) => <article key={agent.id} className="glass rounded-2xl p-6"><div className="flex items-center gap-4"><div className="grid size-12 place-items-center rounded-2xl bg-[#164f3e] text-white"><Bot className="size-6" /></div><div className="min-w-0"><h2 className="truncate font-semibold">{agent.name}</h2><p className="text-xs capitalize text-[#71817c]">{agent.status} voice agent</p></div></div><div className="mt-6 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Calls</p><p className="mt-1 text-2xl font-semibold">{agent.calls}</p></div><div className="rounded-xl bg-white/70 p-4"><p className="text-xs text-[#71817c]">Completion</p><p className="mt-1 text-2xl font-semibold">{agent.score}</p></div></div></article>)}{!voiceAgents.length && <EmptyState>No assigned voice agents match this workspace.</EmptyState>}</div>}
