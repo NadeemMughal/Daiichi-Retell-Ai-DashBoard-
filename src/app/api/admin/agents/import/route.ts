@@ -3,10 +3,7 @@ import { requireAuthorizationContext, requirePermission } from "@/lib/auth/conte
 import { listRetellAgents, listRetellHistory } from "@/lib/retell/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export async function POST() {
-  const context = await requireAuthorizationContext();
-  requirePermission(context, "agents.manage");
-  requirePermission(context, "retell_connections.manage");
+async function synchronizeRetellData(actorUserId: string | null) {
   const admin = createAdminClient();
   let { data: connection } = await admin.from("retell_connections").select("id").eq("status", "active").limit(1).maybeSingle();
   if (!connection) {
@@ -54,7 +51,22 @@ export async function POST() {
       .in("provider_agent_id", current.map((agent) => agent.providerAgentId));
     if (error) return NextResponse.json({ error: "AGENT_ACTIVATE_FAILED" }, { status: 503 });
   }
+  const assignedTenantIds = new Set((importedAgents ?? []).flatMap((agent) => agent.agent_assignments?.filter((assignment) => !assignment.valid_to).map((assignment) => assignment.tenant_id) ?? []));
+  for (const tenantId of assignedTenantIds) await admin.from("dashboard_refresh_signals").upsert({ tenant_id: tenantId, resource: "agents", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
   await admin.from("retell_connections").update({ last_sync_at: new Date().toISOString(), status: "active" }).eq("id", connection.id);
-  await admin.from("audit_logs").insert({ actor_user_id: context.userId, action: "retell.agents.imported", target_type: "retell_connection", target_id: connection.id, safe_metadata: { voiceCount: agents.voice.length, chatCount: agents.chat.length } });
+  await admin.from("audit_logs").insert({ actor_user_id: actorUserId, action: actorUserId ? "retell.agents.imported" : "retell.agents.scheduled_sync", target_type: "retell_connection", target_id: connection.id, safe_metadata: { voiceCount: agents.voice.length, chatCount: agents.chat.length } });
   return NextResponse.json({ ok: true, voiceCount: agents.voice.length, chatCount: agents.chat.length, callCount: callRows.length, conversationCount: chatRows.length });
+}
+
+export async function POST() {
+  const context = await requireAuthorizationContext();
+  requirePermission(context, "agents.manage");
+  requirePermission(context, "retell_connections.manage");
+  return synchronizeRetellData(context.userId);
+}
+
+export async function GET(request: Request) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  return synchronizeRetellData(null);
 }

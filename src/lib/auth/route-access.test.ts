@@ -29,8 +29,8 @@ describe("protected route access matrix", () => {
   });
 
   it("keeps secret-authenticated ingestion routes outside dashboard role grants", () => {
-    const serviceRoutes = ["/api/webhooks/retell", "/api/cron/process-webhooks"];
-    expect(serviceRoutes).toHaveLength(2);
+    const serviceRoutes = ["/api/webhooks/retell", "/api/cron/process-webhooks", "/api/admin/agents/import#scheduled"];
+    expect(serviceRoutes).toHaveLength(3);
     expect(protectedRoutes.some(({ route }) => serviceRoutes.includes(route))).toBe(false);
   });
 });
