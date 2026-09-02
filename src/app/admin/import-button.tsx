@@ -17,10 +17,10 @@ export function ImportButton() {
     setMessage(null);
     try {
       const response = await fetch("/api/admin/agents/import", { method: "POST" });
-      const result = await response.json() as { ok?: boolean; voiceCount?: number; chatCount?: number; callCount?: number; conversationCount?: number; error?: string };
-      if (!response.ok) throw new Error(result.error ?? "Import failed");
+      const result = await response.json() as { ok?: boolean; voiceCount?: number; chatCount?: number; callCount?: number; conversationCount?: number; contactCount?: number; error?: string; code?: string; detail?: string };
+      if (!response.ok) throw new Error([result.error, result.code, result.detail].filter(Boolean).join(": ") || "Import failed");
       setLastSyncedAt(new Date());
-      setMessage(`${automatic ? "Automatic sync: " : ""}${result.voiceCount ?? 0} voice agents, ${result.chatCount ?? 0} chat agents, ${result.callCount ?? 0} calls, and ${result.conversationCount ?? 0} chats synchronized.`);
+      setMessage(`${automatic ? "Automatic sync: " : ""}${result.voiceCount ?? 0} voice agents, ${result.chatCount ?? 0} chat agents, ${result.callCount ?? 0} calls, ${result.conversationCount ?? 0} chats, and ${result.contactCount ?? 0} contacts synchronized.`);
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Import failed");

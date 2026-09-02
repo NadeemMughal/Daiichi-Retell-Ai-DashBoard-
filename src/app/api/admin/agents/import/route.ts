@@ -1,7 +1,19 @@
 import { NextResponse } from "next/server";
 import { requireAuthorizationContext, requirePermission } from "@/lib/auth/context";
-import { listRetellAgents, listRetellHistory } from "@/lib/retell/client";
+import { listRetellAgents, listRetellContacts, listRetellHistory } from "@/lib/retell/client";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+async function upsertHistoryRows(admin: ReturnType<typeof createAdminClient>, table: "calls" | "chats" | "contacts", rows: Record<string, unknown>[], conflict: string) {
+  if (!rows.length) return null;
+  const firstAttempt = await admin.from(table).upsert(rows, { onConflict: conflict });
+  if (!firstAttempt.error) return null;
+  // A short retry handles transient PostgREST/database interruptions without
+  // making the operator press Sync again. Deterministic validation failures
+  // are returned unchanged on the second attempt.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const retry = await admin.from(table).upsert(rows, { onConflict: conflict });
+  return retry.error;
+}
 
 async function synchronizeRetellData(actorUserId: string | null) {
   const admin = createAdminClient();
@@ -35,11 +47,20 @@ async function synchronizeRetellData(actorUserId: string | null) {
   const { data: importedAgents, error: importedAgentsError } = await admin.from("retell_agents").select("id,provider_agent_id,connection_id,agent_assignments(tenant_id,valid_to)").eq("connection_id", connection.id).eq("status", "active");
   if (importedAgentsError) return NextResponse.json({ error: "AGENT_LOOKUP_FAILED" }, { status: 503 });
   const history = await listRetellHistory();
+  const contacts = await listRetellContacts();
   const agentContext = new Map((importedAgents ?? []).flatMap((agent) => { const assignment = agent.agent_assignments?.find((item) => !item.valid_to); return assignment ? [[agent.provider_agent_id, { id: agent.id, connectionId: agent.connection_id, tenantId: assignment.tenant_id }] as const] : []; }));
   const callRows = history.calls.flatMap((call) => { const owner = agentContext.get(call.agent_id); if (!owner) return []; const analysis = call.call_analysis; const custom = analysis?.custom_analysis_data as Record<string, unknown> | undefined; return [{ tenant_id: owner.tenantId, connection_id: owner.connectionId, agent_id: owner.id, provider_call_id: call.call_id, status: call.call_status, direction: "direction" in call ? call.direction : "web_call", started_at: call.start_timestamp ? new Date(call.start_timestamp).toISOString() : null, ended_at: call.end_timestamp ? new Date(call.end_timestamp).toISOString() : null, duration_ms: call.duration_ms ?? null, disconnection_reason: call.disconnection_reason ?? null, contact_masked: "Protected caller", summary: analysis?.call_summary ?? null, sentiment: analysis?.user_sentiment ?? null, outcome: typeof custom?.outcome === "string" ? custom.outcome : analysis?.call_successful === true ? "Successful" : analysis?.call_successful === false ? "Unsuccessful" : null, provider_cost_minor: call.call_cost?.combined_cost == null ? null : Math.round(call.call_cost.combined_cost), synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString() }]; });
   const chatRows = history.chats.flatMap((chat) => { const owner = agentContext.get(chat.agent_id); if (!owner) return []; const analysis = chat.chat_analysis; const custom = analysis?.custom_analysis_data as Record<string, unknown> | undefined; return [{ tenant_id: owner.tenantId, connection_id: owner.connectionId, agent_id: owner.id, provider_chat_id: chat.chat_id, status: chat.chat_status, started_at: chat.start_timestamp ? new Date(chat.start_timestamp).toISOString() : null, ended_at: chat.end_timestamp ? new Date(chat.end_timestamp).toISOString() : null, ai_message_count: (chat.message_with_tool_calls ?? []).filter((message) => message.role === "agent").length, summary: analysis?.chat_summary ?? null, sentiment: analysis?.user_sentiment ?? null, outcome: typeof custom?.outcome === "string" ? custom.outcome : analysis?.chat_successful === true ? "Successful" : analysis?.chat_successful === false ? "Unsuccessful" : null, provider_cost_minor: chat.chat_cost?.combined_cost == null ? null : Math.round(chat.chat_cost.combined_cost), synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString() }]; });
-  if (callRows.length) { const { error } = await admin.from("calls").upsert(callRows, { onConflict: "connection_id,provider_call_id" }); if (error) return NextResponse.json({ error: "CALL_HISTORY_IMPORT_FAILED", code: error.code, detail: error.message }, { status: 503 }); }
-  if (chatRows.length) { const { error } = await admin.from("chats").upsert(chatRows, { onConflict: "connection_id,provider_chat_id" }); if (error) return NextResponse.json({ error: "CHAT_HISTORY_IMPORT_FAILED", code: error.code, detail: error.message }, { status: 503 }); }
+  const callImportError = await upsertHistoryRows(admin, "calls", callRows, "connection_id,provider_call_id");
+  if (callImportError) return NextResponse.json({ error: "CALL_HISTORY_IMPORT_FAILED", code: callImportError.code, detail: callImportError.message }, { status: 503 });
+  const chatImportError = await upsertHistoryRows(admin, "chats", chatRows, "connection_id,provider_chat_id");
+  if (chatImportError) return NextResponse.json({ error: "CHAT_HISTORY_IMPORT_FAILED", code: chatImportError.code, detail: chatImportError.message }, { status: 503 });
+  const tenantIds = [...new Set((importedAgents ?? []).flatMap((agent) => agent.agent_assignments?.filter((assignment) => !assignment.valid_to).map((assignment) => assignment.tenant_id) ?? []))];
+  if (contacts.length && tenantIds.length === 1) {
+    const contactRows = contacts.map((contact) => ({ tenant_id: tenantIds[0], connection_id: connection.id, provider_contact_id: contact.contact_id, phone_number: contact.phone_number, first_name: contact.first_name ?? null, last_name: contact.last_name ?? null, do_not_call: contact.do_not_call ?? false, external_id: contact.external_id ?? null, conversation_count: contact.conversation_count ?? 0, last_conversation_at: contact.last_conversation_timestamp ? new Date(contact.last_conversation_timestamp).toISOString() : null, provider_created_at: new Date(contact.created_timestamp).toISOString(), provider_updated_at: new Date(contact.user_modified_timestamp ?? contact.created_timestamp).toISOString(), custom_fields: contact.custom_fields ?? {}, synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString() }));
+    const contactError = await upsertHistoryRows(admin, "contacts", contactRows, "connection_id,provider_contact_id");
+    if (contactError && contactError.code !== "PGRST205" && contactError.code !== "42P01") return NextResponse.json({ error: "CONTACT_IMPORT_FAILED", code: contactError.code, detail: contactError.message }, { status: 503 });
+  }
   await Promise.all([admin.from("calls").delete().like("provider_call_id", "sample_%"), admin.from("chats").delete().like("provider_chat_id", "sample_%")]);
   for (const tenantId of new Set([...callRows.map((row) => row.tenant_id), ...chatRows.map((row) => row.tenant_id)])) {
     if (callRows.some((row) => row.tenant_id === tenantId)) await admin.from("dashboard_refresh_signals").upsert({ tenant_id: tenantId, resource: "calls", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
@@ -57,7 +78,7 @@ async function synchronizeRetellData(actorUserId: string | null) {
   for (const tenantId of assignedTenantIds) await admin.from("dashboard_refresh_signals").upsert({ tenant_id: tenantId, resource: "agents", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
   await admin.from("retell_connections").update({ name: "Daiichi Technologies", last_sync_at: new Date().toISOString(), status: "active" }).eq("id", connection.id);
   await admin.from("audit_logs").insert({ actor_user_id: actorUserId, action: actorUserId ? "retell.agents.imported" : "retell.agents.scheduled_sync", target_type: "retell_connection", target_id: connection.id, safe_metadata: { voiceCount: agents.voice.length, chatCount: agents.chat.length } });
-  return NextResponse.json({ ok: true, voiceCount: agents.voice.length, chatCount: agents.chat.length, callCount: callRows.length, conversationCount: chatRows.length });
+  return NextResponse.json({ ok: true, voiceCount: agents.voice.length, chatCount: agents.chat.length, callCount: callRows.length, conversationCount: chatRows.length, contactCount: contacts.length });
 }
 
 export async function POST() {

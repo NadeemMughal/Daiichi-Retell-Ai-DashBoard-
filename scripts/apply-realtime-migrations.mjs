@@ -13,7 +13,7 @@ const connectionString = configuration.DATABASE_DIRECT_URL || configuration.DATA
 if (!connectionString) throw new Error("Missing database connection string.");
 const sql = postgres(connectionString, { ssl: "require", max: 1, connect_timeout: 20 });
 try {
-  for (const filename of ["supabase/migrations/0007_dashboard_realtime_signals.sql", "supabase/migrations/0009_agent_realtime_signals.sql"]) {
+  for (const filename of ["supabase/migrations/0007_dashboard_realtime_signals.sql", "supabase/migrations/0009_agent_realtime_signals.sql", "supabase/migrations/0010_retell_contacts.sql"]) {
     await sql.unsafe(fs.readFileSync(filename, "utf8"));
     console.log(`Applied ${filename}`);
   }

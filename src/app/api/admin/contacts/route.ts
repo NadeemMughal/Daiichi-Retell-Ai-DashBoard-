@@ -2,6 +2,38 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuthorizationContext, requirePermission } from "@/lib/auth/context";
 import { createRetellClient } from "@/lib/retell/client";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+type RetellContact = Awaited<ReturnType<ReturnType<typeof createRetellClient>["contact"]["create"]>>;
+
+async function persistContacts(contacts: RetellContact[]) {
+  if (!contacts.length) return true;
+  const admin = createAdminClient();
+  const [{ data: tenant }, { data: connection }] = await Promise.all([
+    admin.from("tenants").select("id").eq("status", "active").limit(1).maybeSingle(),
+    admin.from("retell_connections").select("id").eq("status", "active").limit(1).maybeSingle()
+  ]);
+  if (!tenant || !connection) return false;
+  const { error } = await admin.from("contacts").upsert(contacts.map((contact) => ({
+    tenant_id: tenant.id,
+    connection_id: connection.id,
+    provider_contact_id: contact.contact_id,
+    phone_number: contact.phone_number,
+    first_name: contact.first_name ?? null,
+    last_name: contact.last_name ?? null,
+    do_not_call: contact.do_not_call ?? false,
+    external_id: contact.external_id ?? null,
+    conversation_count: contact.conversation_count ?? 0,
+    last_conversation_at: contact.last_conversation_timestamp ? new Date(contact.last_conversation_timestamp).toISOString() : null,
+    provider_created_at: new Date(contact.created_timestamp).toISOString(),
+    provider_updated_at: new Date(contact.user_modified_timestamp ?? contact.created_timestamp).toISOString(),
+    custom_fields: contact.custom_fields ?? {},
+    synchronized_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  })), { onConflict: "connection_id,provider_contact_id" });
+  if (error && error.code !== "PGRST205" && error.code !== "42P01") console.error("Retell contact persistence failed", { code: error.code });
+  return !error;
+}
 
 const requestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("backfill"), attributes: z.array(z.string().min(1).max(100)).min(1).max(50) }),
@@ -23,7 +55,9 @@ export async function GET() {
   requirePermission(context, "retell_connections.manage");
   try {
     const client = createRetellClient();
-    const [config, agentList] = await Promise.all([client.crm.getConfig(), client.agent.list()]);
+    const [config, agentList, contactList] = await Promise.all([client.crm.getConfig(), client.agent.list(), client.contact.list({ limit: 1000, sort_order: "desc" })]);
+    const contacts = contactList.items ?? [];
+    await persistContacts(contacts);
     const mappingByField = new Map((config.crm_analysis_data_mappings ?? []).map((mapping) => [mapping.field_name, mapping]));
     const voiceAgents = (agentList.items ?? []).filter((agent) => agent.channel === "voice");
     const agentDetails = await Promise.all(voiceAgents.map((agent) => client.agent.retrieve(agent.agent_id).catch(() => null)));
@@ -51,7 +85,13 @@ export async function GET() {
       return { ...field, mapping: mapping?.analysis_data_name, mappingMode: mapping?.update_mode, updatedAt: config.last_sync_timestamp };
     };
     const custom = (config.custom_fields ?? []).map((field) => withMapping({ name: field.name, label: field.label ?? field.name, type: field.type, description: field.description }));
-    return NextResponse.json({ fields: [...builtIn.map(withMapping), ...custom], analysisFields: [...analysisFieldMap.values()].sort((a, b) => a.name.localeCompare(b.name)), lastSyncTimestamp: config.last_sync_timestamp ?? null });
+    return NextResponse.json({
+      fields: [...builtIn.map(withMapping), ...custom],
+      analysisFields: [...analysisFieldMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
+      contacts: contacts.map((contact) => ({ contactId: contact.contact_id, phoneNumber: contact.phone_number, firstName: contact.first_name ?? "", lastName: contact.last_name ?? "", doNotCall: contact.do_not_call ?? false, externalId: contact.external_id ?? "", conversations: contact.conversation_count ?? 0, latestConversation: contact.last_conversation_timestamp ? new Date(contact.last_conversation_timestamp).toISOString() : null })),
+      totalContacts: contactList.total ?? contacts.length,
+      lastSyncTimestamp: config.last_sync_timestamp ?? null
+    });
   } catch (error) {
     const requestId = crypto.randomUUID();
     console.error("Retell contact fields lookup failed", { requestId, errorName: error instanceof Error ? error.name : "UnknownError" });
@@ -103,7 +143,8 @@ export async function POST(request: Request) {
       do_not_call: parsed.data.doNotCall,
       custom_fields: { do_no_call: parsed.data.call ?? false }
     });
-    return NextResponse.json({ ok: true, contactId: contact.contact_id, message: "Contact added to Retell." }, { status: 201 });
+    const databaseSynced = await persistContacts([contact]);
+    return NextResponse.json({ ok: true, contactId: contact.contact_id, databaseSynced, message: databaseSynced ? "Contact added to Retell and synchronized." : "Contact added to Retell; database migration is pending." }, { status: 201 });
   } catch (error) {
     const requestId = crypto.randomUUID();
     console.error("Retell contact action failed", { requestId, errorName: error instanceof Error ? error.name : "UnknownError" });

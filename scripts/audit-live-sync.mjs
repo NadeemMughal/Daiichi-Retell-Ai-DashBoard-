@@ -16,8 +16,9 @@ if (required.some((name) => !configuration[name])) throw new Error("Missing live
 
 const retell = new Retell({ apiKey: configuration.RETELL_API_KEY, timeout: 20_000, maxRetries: 2 });
 const supabase = createClient(configuration.NEXT_PUBLIC_SUPABASE_URL, configuration.SUPABASE_SECRET_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-const [provider, tenantsResult, connectionsResult, agentsResult, assignmentsResult, grantsResult, callsResult, chatsResult, signalsResult] = await Promise.all([
+const [provider, providerContacts, tenantsResult, connectionsResult, agentsResult, assignmentsResult, grantsResult, callsResult, chatsResult, contactsResult, signalsResult] = await Promise.all([
   retell.agent.list({ filter_criteria: { channel: { type: "string", op: "eq", value: "voice" } } }),
+  retell.contact.list({ limit: 1000 }),
   supabase.from("tenants").select("id,slug,display_name,status").neq("status", "archived"),
   supabase.from("retell_connections").select("id,name,status,last_sync_at").eq("status", "active"),
   supabase.from("retell_agents").select("id,provider_agent_id,display_name,kind,status").eq("status", "active"),
@@ -25,11 +26,13 @@ const [provider, tenantsResult, connectionsResult, agentsResult, assignmentsResu
   supabase.from("user_agent_access").select("agent_id,user_id").is("revoked_at", null),
   supabase.from("calls").select("id,tenant_id,agent_id,provider_call_id", { count: "exact" }),
   supabase.from("chats").select("id,tenant_id,agent_id,provider_chat_id", { count: "exact" }),
+  supabase.from("contacts").select("id,tenant_id,provider_contact_id", { count: "exact" }),
   supabase.from("dashboard_refresh_signals").select("tenant_id,resource,changed_at")
 ]);
 
 for (const result of [tenantsResult, connectionsResult, agentsResult, assignmentsResult, grantsResult, callsResult, chatsResult]) if (result.error) throw result.error;
 if (signalsResult.error && signalsResult.error.code !== "PGRST205") throw signalsResult.error;
+if (contactsResult.error && contactsResult.error.code !== "PGRST205") throw contactsResult.error;
 const providerAgents = [...new Map((provider.items ?? []).map((agent) => [agent.agent_id, { providerId: agent.agent_id, name: agent.agent_name, channel: agent.channel }])).values()];
 const assignments = assignmentsResult.data ?? [];
 const grants = grantsResult.data ?? [];
@@ -53,5 +56,7 @@ console.log(JSON.stringify({
   staleInDashboard: [...dashboardIds].filter((id) => !providerIds.has(id)),
   callCount: callsResult.count ?? callsResult.data?.length ?? 0,
   chatCount: chatsResult.count ?? chatsResult.data?.length ?? 0,
+  retellContactCount: providerContacts.total ?? providerContacts.items?.length ?? 0,
+  databaseContactCount: contactsResult.error?.code === "PGRST205" ? "MIGRATION_REQUIRED" : contactsResult.count ?? contactsResult.data?.length ?? 0,
   refreshSignals: signalsResult.error?.code === "PGRST205" ? "MIGRATION_REQUIRED" : signalsResult.data
 }, null, 2));

@@ -38,11 +38,19 @@ export async function listRetellPhoneNumbers() {
   }));
 }
 
+export async function listRetellContacts() {
+  const response = await createRetellClient().contact.list({ limit: 1000, sort_order: "desc" });
+  return response.items ?? [];
+}
+
 export async function listRetellHistory() {
   const client = createRetellClient();
   const [calls, chats] = await Promise.all([
     client.call.list({ limit: 1000, sort_order: "descending" }),
     client.chat.list({ limit: 1000, sort_order: "descending" })
   ]);
-  return { calls: calls.items ?? [], chats: chats.items ?? [] };
+  return {
+    calls: [...new Map((calls.items ?? []).map((call) => [call.call_id, call])).values()],
+    chats: [...new Map((chats.items ?? []).map((chat) => [chat.chat_id, chat])).values()]
+  };
 }
