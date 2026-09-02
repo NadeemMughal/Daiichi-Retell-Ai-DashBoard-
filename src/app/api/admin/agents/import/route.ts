@@ -65,10 +65,11 @@ async function synchronizeRetellData(actorUserId: string | null) {
   const importedAgentsResult = await admin.from("retell_agents").select("id,provider_agent_id,connection_id,agent_assignments(tenant_id,valid_to)").eq("connection_id", connection.id).eq("status", "active");
   if (importedAgentsResult.error) return NextResponse.json({ error: "AGENT_LOOKUP_FAILED" }, { status: 503 });
   let importedAgents = importedAgentsResult.data;
-  const { data: activeTenants, error: tenantLookupError } = await admin.from("tenants").select("id").eq("status", "active").limit(2);
+  const { data: automaticTenant, error: tenantLookupError } = await admin.from("tenants").select("id").eq("slug", "daiichi-technologies").eq("status", "active").maybeSingle();
   if (tenantLookupError) return NextResponse.json({ error: "TENANT_LOOKUP_FAILED" }, { status: 503 });
-  if (activeTenants?.length === 1) {
-    const automaticTenantId = activeTenants[0]!.id;
+  if (!automaticTenant) return NextResponse.json({ error: "DAIICHI_TECHNOLOGIES_WORKSPACE_MISSING" }, { status: 503 });
+  {
+    const automaticTenantId = automaticTenant.id;
     let assignmentActor = actorUserId;
     if (!assignmentActor) {
       const { data: platformActor } = await admin.from("platform_role_assignments").select("user_id").in("role", ["super_admin", "operations_admin"]).is("revoked_at", null).order("granted_at", { ascending: true }).limit(1).maybeSingle();
