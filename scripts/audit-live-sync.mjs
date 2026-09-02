@@ -21,7 +21,7 @@ const [provider, providerContacts, tenantsResult, connectionsResult, agentsResul
   retell.contact.list({ limit: 1000 }),
   supabase.from("tenants").select("id,slug,display_name,status").neq("status", "archived"),
   supabase.from("retell_connections").select("id,name,status,last_sync_at").eq("status", "active"),
-  supabase.from("retell_agents").select("id,provider_agent_id,display_name,kind,status").eq("status", "active"),
+  supabase.from("retell_agents").select("id,provider_agent_id,display_name,kind,status"),
   supabase.from("agent_assignments").select("agent_id,tenant_id").is("valid_to", null),
   supabase.from("user_agent_access").select("agent_id,user_id").is("revoked_at", null),
   supabase.from("calls").select("id,tenant_id,agent_id,provider_call_id", { count: "exact" }),
@@ -36,7 +36,7 @@ if (contactsResult.error && contactsResult.error.code !== "PGRST205") throw cont
 const providerAgents = [...new Map((provider.items ?? []).map((agent) => [agent.agent_id, { providerId: agent.agent_id, name: agent.agent_name, channel: agent.channel }])).values()];
 const assignments = assignmentsResult.data ?? [];
 const grants = grantsResult.data ?? [];
-const dashboardAgents = (agentsResult.data ?? []).map((agent) => ({
+const dashboardAgents = (agentsResult.data ?? []).filter((agent) => agent.status === "active").map((agent) => ({
   providerId: agent.provider_agent_id,
   name: agent.display_name,
   kind: agent.kind,
@@ -45,6 +45,7 @@ const dashboardAgents = (agentsResult.data ?? []).map((agent) => ({
 }));
 const providerIds = new Set(providerAgents.map((agent) => agent.providerId));
 const dashboardIds = new Set(dashboardAgents.map((agent) => agent.providerId));
+const retiredAgents = (agentsResult.data ?? []).filter((agent) => agent.status === "inactive").map((agent) => ({ providerId: agent.provider_agent_id, name: agent.display_name, activeTenantAssignments: assignments.filter((assignment) => assignment.agent_id === agent.id).length, activeUserGrants: grants.filter((grant) => grant.agent_id === agent.id).length }));
 
 console.log(JSON.stringify({
   checkedAt: new Date().toISOString(),
@@ -52,6 +53,7 @@ console.log(JSON.stringify({
   activeConnections: connectionsResult.data,
   providerAgents,
   dashboardAgents,
+  retiredAgents,
   missingFromDashboard: [...providerIds].filter((id) => !dashboardIds.has(id)),
   staleInDashboard: [...dashboardIds].filter((id) => !providerIds.has(id)),
   callCount: callsResult.count ?? callsResult.data?.length ?? 0,

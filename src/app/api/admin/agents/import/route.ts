@@ -44,8 +44,47 @@ async function synchronizeRetellData(actorUserId: string | null) {
     const { error } = await stale;
     if (error) return NextResponse.json({ error: "AGENT_RETIRE_FAILED" }, { status: 503 });
   }
-  const { data: importedAgents, error: importedAgentsError } = await admin.from("retell_agents").select("id,provider_agent_id,connection_id,agent_assignments(tenant_id,valid_to)").eq("connection_id", connection.id).eq("status", "active");
-  if (importedAgentsError) return NextResponse.json({ error: "AGENT_LOOKUP_FAILED" }, { status: 503 });
+  const { data: retiredAgents, error: retiredLookupError } = await admin.from("retell_agents").select("id").eq("connection_id", connection.id).eq("status", "inactive");
+  if (retiredLookupError) return NextResponse.json({ error: "RETIRED_AGENT_LOOKUP_FAILED" }, { status: 503 });
+  const retiredAgentIds = (retiredAgents ?? []).map((agent) => agent.id);
+  if (retiredAgentIds.length) {
+    const [{ data: retiredAssignments, error: retiredAssignmentsError }, { data: retiredGrants, error: retiredGrantsError }] = await Promise.all([
+      admin.from("agent_assignments").select("agent_id,tenant_id").in("agent_id", retiredAgentIds).is("valid_to", null),
+      admin.from("user_agent_access").select("agent_id,tenant_id").in("agent_id", retiredAgentIds).is("revoked_at", null)
+    ]);
+    if (retiredAssignmentsError || retiredGrantsError) return NextResponse.json({ error: "RETIRED_AGENT_ACCESS_LOOKUP_FAILED" }, { status: 503 });
+    const retiredAt = new Date().toISOString();
+    const [{ error: closeAssignmentsError }, { error: revokeGrantsError }] = await Promise.all([
+      admin.from("agent_assignments").update({ valid_to: retiredAt }).in("agent_id", retiredAgentIds).is("valid_to", null),
+      admin.from("user_agent_access").update({ revoked_at: retiredAt }).in("agent_id", retiredAgentIds).is("revoked_at", null)
+    ]);
+    if (closeAssignmentsError || revokeGrantsError) return NextResponse.json({ error: "RETIRED_AGENT_ACCESS_CLEANUP_FAILED" }, { status: 503 });
+    const affectedTenantIds = new Set([...(retiredAssignments ?? []).map((row) => row.tenant_id), ...(retiredGrants ?? []).map((row) => row.tenant_id)]);
+    for (const tenantId of affectedTenantIds) await admin.from("dashboard_refresh_signals").upsert({ tenant_id: tenantId, resource: "agents", changed_at: retiredAt }, { onConflict: "tenant_id,resource" });
+  }
+  const importedAgentsResult = await admin.from("retell_agents").select("id,provider_agent_id,connection_id,agent_assignments(tenant_id,valid_to)").eq("connection_id", connection.id).eq("status", "active");
+  if (importedAgentsResult.error) return NextResponse.json({ error: "AGENT_LOOKUP_FAILED" }, { status: 503 });
+  let importedAgents = importedAgentsResult.data;
+  const { data: activeTenants, error: tenantLookupError } = await admin.from("tenants").select("id").eq("status", "active").limit(2);
+  if (tenantLookupError) return NextResponse.json({ error: "TENANT_LOOKUP_FAILED" }, { status: 503 });
+  if (activeTenants?.length === 1) {
+    const automaticTenantId = activeTenants[0]!.id;
+    let assignmentActor = actorUserId;
+    if (!assignmentActor) {
+      const { data: platformActor } = await admin.from("platform_role_assignments").select("user_id").in("role", ["super_admin", "operations_admin"]).is("revoked_at", null).order("granted_at", { ascending: true }).limit(1).maybeSingle();
+      assignmentActor = platformActor?.user_id ?? null;
+    }
+    const unassignedAgents = (importedAgents ?? []).filter((agent) => !agent.agent_assignments?.some((assignment) => !assignment.valid_to));
+    if (unassignedAgents.length && !assignmentActor) return NextResponse.json({ error: "AUTOMATIC_ASSIGNMENT_ACTOR_MISSING" }, { status: 503 });
+    if (unassignedAgents.length) {
+      const { error: assignmentError } = await admin.from("agent_assignments").insert(unassignedAgents.map((agent) => ({ tenant_id: automaticTenantId, agent_id: agent.id, assigned_by: assignmentActor!, assignment_reason: "Automatically assigned from the Daiichi Technologies Retell workspace." })));
+      if (assignmentError && assignmentError.code !== "23505") return NextResponse.json({ error: "AUTOMATIC_AGENT_ASSIGNMENT_FAILED", code: assignmentError.code, detail: assignmentError.message }, { status: 503 });
+      const refreshed = await admin.from("retell_agents").select("id,provider_agent_id,connection_id,agent_assignments(tenant_id,valid_to)").eq("connection_id", connection.id).eq("status", "active");
+      if (refreshed.error) return NextResponse.json({ error: "AGENT_ASSIGNMENT_REFRESH_FAILED" }, { status: 503 });
+      importedAgents = refreshed.data;
+      await admin.from("dashboard_refresh_signals").upsert({ tenant_id: automaticTenantId, resource: "agents", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
+    }
+  }
   const history = await listRetellHistory();
   const contacts = await listRetellContacts();
   const agentContext = new Map((importedAgents ?? []).flatMap((agent) => { const assignment = agent.agent_assignments?.find((item) => !item.valid_to); return assignment ? [[agent.provider_agent_id, { id: agent.id, connectionId: agent.connection_id, tenantId: assignment.tenant_id }] as const] : []; }));
