@@ -10,7 +10,7 @@ async function synchronizeRetellData(actorUserId: string | null) {
   let connection = connectionLookup.data;
   if (!connection) {
     const created = await admin.from("retell_connections").insert({
-      name: "Daiichi shared Retell workspace",
+      name: "Daiichi Technologies",
       history_secret_reference: "env:RETELL_API_KEY",
       webhook_secret_reference: process.env.RETELL_WEBHOOK_API_KEY ? "env:RETELL_WEBHOOK_API_KEY" : "env:RETELL_API_KEY"
     }).select("id").single();
@@ -55,7 +55,7 @@ async function synchronizeRetellData(actorUserId: string | null) {
   }
   const assignedTenantIds = new Set((importedAgents ?? []).flatMap((agent) => agent.agent_assignments?.filter((assignment) => !assignment.valid_to).map((assignment) => assignment.tenant_id) ?? []));
   for (const tenantId of assignedTenantIds) await admin.from("dashboard_refresh_signals").upsert({ tenant_id: tenantId, resource: "agents", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
-  await admin.from("retell_connections").update({ last_sync_at: new Date().toISOString(), status: "active" }).eq("id", connection.id);
+  await admin.from("retell_connections").update({ name: "Daiichi Technologies", last_sync_at: new Date().toISOString(), status: "active" }).eq("id", connection.id);
   await admin.from("audit_logs").insert({ actor_user_id: actorUserId, action: actorUserId ? "retell.agents.imported" : "retell.agents.scheduled_sync", target_type: "retell_connection", target_id: connection.id, safe_metadata: { voiceCount: agents.voice.length, chatCount: agents.chat.length } });
   return NextResponse.json({ ok: true, voiceCount: agents.voice.length, chatCount: agents.chat.length, callCount: callRows.length, conversationCount: chatRows.length });
 }

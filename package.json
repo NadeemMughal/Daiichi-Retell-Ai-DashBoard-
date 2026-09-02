@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "audit:live-sync": "node scripts/audit-live-sync.mjs",
+    "normalize:live-workspace": "node scripts/normalize-live-workspace.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "latest",
@@ -38,4 +40,3 @@
     "vitest": "latest"
   }
 }
-
