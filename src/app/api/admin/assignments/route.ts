@@ -21,6 +21,6 @@ export async function POST(request: Request) {
   const { data: assignment, error } = await admin.from("agent_assignments").insert({ tenant_id: tenant.id, agent_id: agent.id, assigned_by: context.userId, assignment_reason: body.data.reason }).select("id").single();
   if (error) return NextResponse.json({ error: "ASSIGNMENT_FAILED" }, { status: error.code === "23505" ? 409 : 503 });
   await admin.from("audit_logs").insert({ tenant_id: tenant.id, actor_user_id: context.userId, action: "agent.assigned", target_type: "retell_agent", target_id: agent.id, reason: body.data.reason, safe_metadata: { assignmentId: assignment.id } });
+  await admin.from("dashboard_refresh_signals").upsert({ tenant_id: tenant.id, resource: "agents", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
   return NextResponse.json({ ok: true, assignmentId: assignment.id }, { status: 201 });
 }
-

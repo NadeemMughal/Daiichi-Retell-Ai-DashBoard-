@@ -29,6 +29,7 @@ import { RetellAgentsView, RetellContactsView, RetellPhoneNumbersView } from "./
 import { type DateRangeValue } from "./date-range-picker";
 import { AnalyticsDashboard } from "./analytics-dashboard";
 import { SessionHistoryView } from "./session-history-view";
+import { LogoutButton } from "@/components/logout-button";
 
 const nav = [
   { label: "Home", slug: "overview", icon: LayoutDashboard },
@@ -66,6 +67,7 @@ const previewMetrics = [
 ];
 
 export type DashboardDataset = {
+  tenantId?: string;
   tenantName: string;
   userName: string;
   metrics: typeof previewMetrics;
@@ -138,13 +140,18 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
   useEffect(() => {
     if (preview) return;
     const supabase = createClient();
+    const tenantFilter = dashboard.tenantId ? `tenant_id=eq.${dashboard.tenantId}` : undefined;
     const channel = supabase.channel("client-access-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "user_agent_access" }, () => router.refresh())
-      .on("postgres_changes", { event: "*", schema: "public", table: "tenant_memberships" }, () => router.refresh())
-      .on("postgres_changes", { event: "*", schema: "public", table: "dashboard_refresh_signals" }, () => router.refresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "user_agent_access", filter: tenantFilter }, () => router.refresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "tenant_memberships", filter: tenantFilter }, () => router.refresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "dashboard_refresh_signals", filter: tenantFilter }, () => router.refresh())
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
-  }, [preview, router]);
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") router.replace("/login");
+      else if (event === "USER_UPDATED") router.refresh();
+    });
+    return () => { authListener.subscription.unsubscribe(); void supabase.removeChannel(channel); };
+  }, [dashboard.tenantId, preview, router]);
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
@@ -179,6 +186,9 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
               <div className="grid size-9 place-items-center rounded-full bg-[#d7f55b] text-xs font-black text-[#123e32]">{dashboard.userName.slice(0, 2).toUpperCase()}</div>
               <div><p className="text-sm font-medium">{dashboard.userName}</p><p className="text-xs capitalize text-white/45">{dashboard.effectiveRole.replace("_", " ")}</p></div>
             </div>
+            {!preview && (
+              <LogoutButton dark loginPath={dashboard.effectiveRole === "super_admin" ? "/login/super-admin" : dashboard.effectiveRole === "admin" ? "/login/admin" : "/login/client"}/>
+            )}
           </div>
         </div>
       </aside>

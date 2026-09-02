@@ -7,6 +7,7 @@ import { AgentAccessManager } from "./agent-access-manager";
 import { UserManager } from "./user-manager";
 import { PlatformAdminManager } from "./platform-admin-manager";
 import { AgentOwnershipList } from "./agent-ownership-list";
+import { LogoutButton } from "@/components/logout-button";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <div className="sm:ml-auto flex flex-wrap gap-2">
           <Link href="/admin" className="flex items-center gap-2 rounded-xl bg-[#164f3e] px-4 py-2.5 text-sm font-semibold text-white"><LayoutDashboard className="size-4" />Operations</Link>
           <Link href="/admin/dashboard" className="flex items-center gap-2 rounded-xl border border-[#173f3317] bg-white px-4 py-2.5 text-sm font-semibold text-[#164f3e]"><Eye className="size-4" />Admin dashboard</Link>
+          <LogoutButton loginPath={context.platformRoles.includes("super_admin") ? "/login/super-admin" : "/login/admin"} className="min-w-28"/>
         </div>
       </nav>
 

@@ -30,11 +30,16 @@ export async function POST(request: Request) {
     if (tenantAssignment && tenantAssignment.tenant_id !== tenantId) return NextResponse.json({ error: "AGENT_ASSIGNED_TO_ANOTHER_TENANT" }, { status: 409 });
     if (!tenantAssignment) {
       const assignment = await admin.from("agent_assignments").insert({ tenant_id: tenantId, agent_id: agentId, assigned_by: context.userId, assignment_reason: "Assigned while granting read-only user access" });
-      if (assignment.error) return NextResponse.json({ error: "TENANT_ASSIGNMENT_FAILED" }, { status: 503 });
+      if (assignment.error) {
+        if (assignment.error.code !== "23505") return NextResponse.json({ error: "TENANT_ASSIGNMENT_FAILED" }, { status: 503 });
+        const { data: concurrentAssignment } = await admin.from("agent_assignments").select("tenant_id").eq("agent_id", agentId).is("valid_to", null).maybeSingle();
+        if (!concurrentAssignment) return NextResponse.json({ error: "TENANT_ASSIGNMENT_FAILED" }, { status: 503 });
+        if (concurrentAssignment.tenant_id !== tenantId) return NextResponse.json({ error: "AGENT_ASSIGNED_TO_ANOTHER_TENANT" }, { status: 409 });
+      }
     }
     if (!activeGrant) {
       const granted = await admin.from("user_agent_access").insert({ tenant_id: tenantId, user_id: userId, agent_id: agentId, granted_by: context.userId, reason: "Granted by Daiichi system owner" });
-      if (granted.error) return NextResponse.json({ error: granted.error.code === "23505" ? "ACCESS_ALREADY_GRANTED" : "ACCESS_GRANT_FAILED" }, { status: granted.error.code === "23505" ? 409 : 503 });
+      if (granted.error && granted.error.code !== "23505") return NextResponse.json({ error: "ACCESS_GRANT_FAILED" }, { status: 503 });
     }
   } else if (activeGrant) {
     const revoked = await admin.from("user_agent_access").update({ revoked_at: new Date().toISOString() }).eq("id", activeGrant.id);
@@ -42,5 +47,6 @@ export async function POST(request: Request) {
   }
 
   await admin.from("audit_logs").insert({ tenant_id: tenantId, actor_user_id: context.userId, action: action === "grant" ? "user_agent_access.granted" : "user_agent_access.revoked", target_type: "retell_agent", target_id: agentId, safe_metadata: { userId } });
+  await admin.from("dashboard_refresh_signals").upsert({ tenant_id: tenantId, resource: "agents", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
   return NextResponse.json({ ok: true, action });
 }

@@ -140,6 +140,7 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   const allowedViews = dashboardViewsForPermissions(dashboardPermissions);
   if (!allowedViews.length) notFound();
   return {
+    tenantId: context.tenantId ?? undefined,
     tenantName: tenant?.display_name ?? "Client workspace",
     userName: profile?.display_name?.split(" ")[0] ?? profile?.email?.split("@")[0] ?? "there",
     metrics: [
