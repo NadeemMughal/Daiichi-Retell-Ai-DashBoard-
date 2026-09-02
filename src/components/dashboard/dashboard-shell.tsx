@@ -128,6 +128,14 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
   }, [preview, router]);
   useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMobileOpen(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
+  }, [mobileOpen]);
+  useEffect(() => {
     if (preview) return;
     const supabase = createClient();
     const channel = supabase.channel("client-access-changes")
@@ -145,6 +153,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
           DESIGN PREVIEW — SAMPLE DATA ONLY
         </div>
       )}
+      {mobileOpen && <button type="button" aria-label="Close navigation menu" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-[39] bg-[#0b211a]/55 lg:hidden"/>}
       <aside className={cn("fixed inset-y-0 left-0 z-40 w-[280px] border-r border-white/10 bg-[#123e32] text-white transition-transform lg:sticky lg:top-0 lg:w-auto lg:translate-x-0", preview && "pt-8", mobileOpen ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex h-full flex-col p-5">
           <div className="flex items-center justify-between px-2 py-3">

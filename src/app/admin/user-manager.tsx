@@ -45,7 +45,7 @@ export function UserManager({ users, tenants }: { users: User[]; tenants: Tenant
     setMessage("User removed and agent access revoked."); router.refresh();
   }
 
-  return <article id="client-users" className="glass mt-5 scroll-mt-6 rounded-2xl p-6">
+  return <article id="client-users" className="glass mt-5 scroll-mt-6 rounded-2xl p-4 sm:p-6">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h2 className="flex items-center gap-2 font-semibold"><UserRound className="size-5 text-[#1f7659]"/>Client users</h2><p className="mt-1 text-xs text-[#71817c]">Create and manage dashboard-only users. Agent visibility is assigned separately below.</p></div><button onClick={() => { setEditing(null); setAdding(true); }} disabled={!tenants.length} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-[#164f3e] px-4 text-sm font-semibold text-white disabled:opacity-40"><Plus className="size-4"/>Add new user</button></div>
     {message && <p className="mt-4 rounded-xl bg-[#e8f3ed] px-4 py-3 text-sm font-semibold text-[#1f7659]">{message}</p>}
     {(adding || editing) && <form onSubmit={submit} className="mt-5 grid gap-3 rounded-2xl border border-[#173f3310] bg-white/70 p-5 md:grid-cols-2 xl:grid-cols-3">

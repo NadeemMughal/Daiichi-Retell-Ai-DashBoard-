@@ -51,6 +51,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 [role="dialog"], [role="menu"] { animation: popover-in 160ms ease-out both; }
+
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button, a, input, select, textarea { transition-property: color, background-color, border-color, box-shadow, opacity, transform; transition-duration: 150ms; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid rgba(31, 118, 89, .75);
+  outline-offset: 2px;
+}
+button:disabled { cursor: not-allowed; }
+@media (hover: hover) { button:not(:disabled):active, a:active { transform: translateY(1px); } }
+@media (max-width: 639px) {
+  [role="dialog"] footer button { min-height: 44px; }
+  table { font-size: .8125rem; }
+}
 .target-panel:target, #webhook-exceptions:target {
   border-color: rgba(31, 118, 89, .55);
   animation: target-pulse 1.4s ease-out both;
