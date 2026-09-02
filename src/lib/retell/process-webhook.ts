@@ -48,7 +48,7 @@ export async function processRetellWebhookEvent(eventId: string, eventType: stri
         outcome: typeof custom?.outcome === "string" ? custom.outcome : call.call_analysis?.call_successful === true ? "Successful" : call.call_analysis?.call_successful === false ? "Unsuccessful" : null,
         transcript_text: context.tenant?.transcript_access_enabled ? call.transcript : null,
         recording_locator: context.tenant?.recording_access_enabled ? call.scrubbed_recording_url ?? call.recording_url : null,
-        provider_cost_minor: call.call_cost?.combined_cost, synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        provider_cost_minor: call.call_cost?.combined_cost == null ? null : Math.round(call.call_cost.combined_cost), synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString()
       }, { onConflict: "connection_id,provider_call_id" });
       if (synchronized.error) throw synchronized.error;
       await admin.from("dashboard_refresh_signals").upsert({ tenant_id: context.tenantId, resource: "calls", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
@@ -62,7 +62,7 @@ export async function processRetellWebhookEvent(eventId: string, eventType: stri
         started_at: timestamp(chat.start_timestamp), ended_at: timestamp(chat.end_timestamp), ai_message_count: (chat.message_with_tool_calls ?? []).filter((message) => message.role === "agent").length,
         summary: chat.chat_analysis?.chat_summary, sentiment: chat.chat_analysis?.user_sentiment,
         outcome: typeof custom?.outcome === "string" ? custom.outcome : chat.chat_analysis?.chat_successful === true ? "Successful" : chat.chat_analysis?.chat_successful === false ? "Unsuccessful" : null,
-        transcript_text: context.tenant?.transcript_access_enabled ? chat.transcript : null, provider_cost_minor: chat.chat_cost?.combined_cost,
+        transcript_text: context.tenant?.transcript_access_enabled ? chat.transcript : null, provider_cost_minor: chat.chat_cost?.combined_cost == null ? null : Math.round(chat.chat_cost.combined_cost),
         synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString()
       }, { onConflict: "connection_id,provider_chat_id" });
       if (synchronized.error) throw synchronized.error;
