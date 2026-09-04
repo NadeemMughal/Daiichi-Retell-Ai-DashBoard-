@@ -196,9 +196,9 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
       <main className={cn("min-w-0", preview && "pt-8")}>
         <header className="sticky top-0 z-30 flex h-[76px] items-center gap-4 border-b border-[#173f3314] bg-[#f4f6f2dd] px-5 backdrop-blur-xl md:px-8">
           <button aria-label="Open menu" onClick={() => setMobileOpen(true)} className="rounded-xl border border-[#173f331a] bg-white p-2.5 lg:hidden"><Menu className="size-5" /></button>
-          {active === "Home" && <div className="relative hidden max-w-sm flex-1 sm:block">
+          {active === "Home" && <div className="relative min-w-0 max-w-sm flex-1">
             <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[#70827c]" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search calls, agents, outcomes..." className="h-11 w-full rounded-xl border border-[#173f3317] bg-white/70 pl-10 pr-4 text-sm outline-none transition focus:border-[#1f7659] focus:ring-4 focus:ring-[#1f765915]" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search calls, agents…" className="h-11 w-full rounded-xl border border-[#173f3317] bg-white/70 pl-10 pr-4 text-sm outline-none transition focus:border-[#1f7659] focus:ring-4 focus:ring-[#1f765915]" />
           </div>}
           <div className="ml-auto flex items-center gap-3">
             <div className="hidden items-center gap-2 rounded-full bg-[#e7f7ee] px-3 py-2 text-xs font-semibold text-[#1c674e] md:flex"><span className="size-2 animate-pulse rounded-full bg-[#28a06f]" />Live · refreshed {new Date(dashboard.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
