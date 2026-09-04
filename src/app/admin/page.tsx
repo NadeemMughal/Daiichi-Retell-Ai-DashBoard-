@@ -27,7 +27,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const context = await requireAuthorizationContext();
   requirePermission(context, "platform.manage");
   const admin = createAdminClient();
-  const [{ data: tenants }, { data: agents }, { count: pendingEvents }, { data: webhookExceptions }, { count: invoiceCount }, { data: memberships }, { data: accessGrants }, { data: platformAdmins }] = await Promise.all([
+  const [{ data: tenants }, { data: agents }, { count: pendingEvents }, { data: webhookExceptions }, { count: invoiceCount }, { data: memberships }, { data: accessGrants }, { data: platformAdmins }, { data: connection }] = await Promise.all([
     admin.from("tenants").select("id,slug,display_name,status").neq("status", "archived").order("display_name"),
     admin.from("retell_agents").select("id,display_name,kind,agent_assignments(id,tenant_id,valid_to,tenants(display_name))").eq("status", "active").order("display_name"),
     admin.from("webhook_events").select("id", { count: "exact", head: true }).in("status", ["pending", "failed", "dead_letter"]),
@@ -35,7 +35,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     admin.from("manual_invoices").select("id", { count: "exact", head: true }).neq("status", "paid"),
     admin.from("tenant_memberships").select("user_id,tenant_id,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email),tenants(display_name)").eq("status", "active"),
     admin.from("user_agent_access").select("user_id,agent_id").is("revoked_at", null),
-    admin.from("platform_role_assignments").select("user_id,role,user:profiles!platform_role_assignments_user_id_fkey(display_name,email)").in("role", ["super_admin", "operations_admin"]).is("revoked_at", null)
+    admin.from("platform_role_assignments").select("user_id,role,user:profiles!platform_role_assignments_user_id_fkey(display_name,email)").in("role", ["super_admin", "operations_admin"]).is("revoked_at", null),
+    admin.from("retell_connections").select("last_sync_at").eq("status", "active").limit(1).maybeSingle()
   ]);
   const unassigned = (agents ?? []).filter((agent) => !agent.agent_assignments?.some((assignment) => !assignment.valid_to));
   const cards = [
@@ -78,7 +79,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
       <header className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.18em] text-[#1f7659]"><ShieldCheck className="size-4" />Daiichi operations</div><h1 className="mt-3 text-4xl font-semibold tracking-[-.05em]">Platform control center</h1><p className="mt-2 text-[#71817c]">Shared Retell workspace, isolated through explicit client assignments.</p></div>
-        {context.permissions.has("retell_connections.manage") && <ImportButton />}
+        {context.permissions.has("retell_connections.manage") && <ImportButton lastSyncedAt={connection?.last_sync_at ?? null} />}
       </header>
 
       <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards.map((card) => <Link key={card.label} href={card.href} className="glass group rounded-2xl p-5 transition hover:-translate-y-0.5 hover:shadow-xl"><div className="flex items-start justify-between"><div className={`grid size-10 place-items-center rounded-xl ${card.tone}`}><card.icon className="size-5" /></div><ChevronRight className="size-5 text-[#84928d] transition group-hover:translate-x-1" /></div><p className="mt-5 text-sm text-[#71817c]">{card.label}</p><p className="mt-1 text-3xl font-semibold">{card.value}</p><p className="mt-2 text-xs font-semibold text-[#1f7659]">View details</p></Link>)}</section>

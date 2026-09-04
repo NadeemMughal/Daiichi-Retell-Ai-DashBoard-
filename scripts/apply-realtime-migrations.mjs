@@ -11,12 +11,34 @@ for (const filename of [".env", ".env.local"]) {
 }
 const connectionString = configuration.DATABASE_DIRECT_URL || configuration.DATABASE_URL;
 if (!connectionString) throw new Error("Missing database connection string.");
+
+// Every migration after the foundation, in order. 0008 was previously missing from
+// this list, so calls.contact_unmasked never reached the database and each call
+// webhook failed on an unknown column.
+const migrations = [
+  "supabase/migrations/0007_dashboard_realtime_signals.sql",
+  "supabase/migrations/0008_contact_privacy_and_effective_roles.sql",
+  "supabase/migrations/0009_agent_realtime_signals.sql",
+  "supabase/migrations/0010_retell_contacts.sql"
+];
+// duplicate table, object, schema and function. Re-running must not abort the rest.
+const alreadyApplied = new Set(["42P07", "42710", "42P06", "42723"]);
+
 const sql = postgres(connectionString, { ssl: "require", max: 1, connect_timeout: 20 });
 try {
-  for (const filename of ["supabase/migrations/0007_dashboard_realtime_signals.sql", "supabase/migrations/0009_agent_realtime_signals.sql", "supabase/migrations/0010_retell_contacts.sql"]) {
-    await sql.unsafe(fs.readFileSync(filename, "utf8"));
-    console.log(`Applied ${filename}`);
+  for (const filename of migrations) {
+    try {
+      await sql.unsafe(fs.readFileSync(filename, "utf8"));
+      console.log(`Applied ${filename}`);
+    } catch (error) {
+      if (!alreadyApplied.has(error.code)) throw error;
+      console.log(`Skipped ${filename} (already applied: ${error.code})`);
+    }
   }
+  // PostgREST caches the schema. A new column stays invisible to the Data API
+  // until the cache reloads, which is what PGRST204 reports.
+  await sql`notify pgrst, 'reload schema'`;
+  console.log("Requested PostgREST schema reload");
 } finally {
   await sql.end();
 }

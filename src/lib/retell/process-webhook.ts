@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { createRetellClient } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { missingColumnFrom, withoutColumn } from "@/lib/supabase/schema-drift";
 
 const callSchema = z.object({
   call_id: z.string(), agent_id: z.string(), call_status: z.string(), direction: z.string().optional(),
@@ -19,6 +20,18 @@ const chatSchema = z.object({
 }).passthrough();
 
 function timestamp(value?: number) { return value ? new Date(value).toISOString() : null; }
+
+// Without this, a single column the deployed schema lacks fails every call
+// webhook, retries it five times and dead-letters it, silently stopping live
+// ingestion until the migration is applied.
+async function upsertSession(admin: ReturnType<typeof createAdminClient>, table: "calls" | "chats", row: Record<string, unknown>, conflict: string) {
+  const attempt = await admin.from(table).upsert(row, { onConflict: conflict });
+  const missing = missingColumnFrom(attempt.error);
+  if (!missing || !(missing in row)) return attempt;
+  const [reduced] = withoutColumn([row], missing);
+  console.warn("Retell webhook stored without an unavailable column", { table, column: missing });
+  return admin.from(table).upsert(reduced!, { onConflict: conflict });
+}
 
 async function assignmentForProviderAgent(providerAgentId: string) {
   const admin = createAdminClient();
@@ -41,7 +54,7 @@ export async function processRetellWebhookEvent(eventId: string, eventType: stri
       const context = await assignmentForProviderAgent(call.agent_id);
       if (!context) { await admin.from("webhook_events").update({ status: "quarantined", last_error_code: "UNASSIGNED_AGENT" }).eq("id", eventId); return; }
       const custom = call.call_analysis?.custom_analysis_data;
-      const synchronized = await admin.from("calls").upsert({
+      const synchronized = await upsertSession(admin, "calls", {
         tenant_id: context.tenantId, connection_id: context.agent.connection_id, agent_id: context.agent.id, provider_call_id: call.call_id,
         status: call.call_status, direction: call.direction, started_at: timestamp(call.start_timestamp), ended_at: timestamp(call.end_timestamp), duration_ms: call.duration_ms,
         disconnection_reason: call.disconnection_reason, contact_masked: "Protected caller", contact_unmasked: context.tenant?.contact_masking_enabled ? null : (call.direction === "outbound" ? call.to_number : call.from_number) ?? null, summary: call.call_analysis?.call_summary, sentiment: call.call_analysis?.user_sentiment,
@@ -49,7 +62,7 @@ export async function processRetellWebhookEvent(eventId: string, eventType: stri
         transcript_text: context.tenant?.transcript_access_enabled ? call.transcript : null,
         recording_locator: context.tenant?.recording_access_enabled ? call.scrubbed_recording_url ?? call.recording_url : null,
         provider_cost_minor: call.call_cost?.combined_cost == null ? null : Math.round(call.call_cost.combined_cost), synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString()
-      }, { onConflict: "connection_id,provider_call_id" });
+      }, "connection_id,provider_call_id");
       if (synchronized.error) throw synchronized.error;
       await admin.from("dashboard_refresh_signals").upsert({ tenant_id: context.tenantId, resource: "calls", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
     } else if (eventType.startsWith("chat_")) {
@@ -57,14 +70,14 @@ export async function processRetellWebhookEvent(eventId: string, eventType: stri
       const context = await assignmentForProviderAgent(chat.agent_id);
       if (!context) { await admin.from("webhook_events").update({ status: "quarantined", last_error_code: "UNASSIGNED_AGENT" }).eq("id", eventId); return; }
       const custom = chat.chat_analysis?.custom_analysis_data;
-      const synchronized = await admin.from("chats").upsert({
+      const synchronized = await upsertSession(admin, "chats", {
         tenant_id: context.tenantId, connection_id: context.agent.connection_id, agent_id: context.agent.id, provider_chat_id: chat.chat_id, status: chat.chat_status,
         started_at: timestamp(chat.start_timestamp), ended_at: timestamp(chat.end_timestamp), ai_message_count: (chat.message_with_tool_calls ?? []).filter((message) => message.role === "agent").length,
         summary: chat.chat_analysis?.chat_summary, sentiment: chat.chat_analysis?.user_sentiment,
         outcome: typeof custom?.outcome === "string" ? custom.outcome : chat.chat_analysis?.chat_successful === true ? "Successful" : chat.chat_analysis?.chat_successful === false ? "Unsuccessful" : null,
         transcript_text: context.tenant?.transcript_access_enabled ? chat.transcript : null, provider_cost_minor: chat.chat_cost?.combined_cost == null ? null : Math.round(chat.chat_cost.combined_cost),
         synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString()
-      }, { onConflict: "connection_id,provider_chat_id" });
+      }, "connection_id,provider_chat_id");
       if (synchronized.error) throw synchronized.error;
       await admin.from("dashboard_refresh_signals").upsert({ tenant_id: context.tenantId, resource: "chats", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
     }

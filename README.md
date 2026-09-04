@@ -86,6 +86,8 @@ npm run build
 3. Test Auth, RLS, agent assignment, webhook signatures, and reconciliation.
 4. Provision production Supabase and apply the same reviewed migration.
 5. Configure production-only Vercel secrets and Retell webhook URL.
-6. Pilot one tenant before adding additional clients.
+6. Run `supabase/cron/setup_agent_import.sql` and `supabase/cron/setup_process_webhooks.sql`
+   in the Supabase SQL editor. Supabase Cron owns both schedules; `vercel.json` declares none.
+7. Pilot one tenant before adding additional clients.
 
 See [architecture](docs/ARCHITECTURE.md) for the trust boundary and shared-workspace decision.

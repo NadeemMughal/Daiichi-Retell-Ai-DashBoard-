@@ -1,7 +1,3 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [
-    { "path": "/api/admin/agents/import", "schedule": "* * * * *" },
-    { "path": "/api/cron/process-webhooks", "schedule": "* * * * *" }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }

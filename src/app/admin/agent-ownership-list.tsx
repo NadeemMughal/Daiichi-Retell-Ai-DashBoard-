@@ -22,7 +22,10 @@ export function AgentOwnershipList({ agents, workspaces, initialAssignmentFilter
     const refresh = () => { setRefreshing(true); router.refresh(); window.setTimeout(() => setRefreshing(false), 500); };
     const channel = supabase.channel("agent-ownership-records")
       .on("postgres_changes", { event: "*", schema: "public", table: "user_agent_access" }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "agent_assignments" }, refresh)
+      // agent_assignments is server-only: it has no authenticated grant and is not
+      // in supabase_realtime, so subscribing to it directly never fires. Every
+      // route that changes an assignment upserts an "agents" refresh signal.
+      .on("postgres_changes", { event: "*", schema: "public", table: "dashboard_refresh_signals" }, refresh)
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [router]);

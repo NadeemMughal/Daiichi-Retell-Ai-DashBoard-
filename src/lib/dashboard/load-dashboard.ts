@@ -27,12 +27,10 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const phoneNumbers = await listRetellPhoneNumbers().catch(() => []);
   const activeAgentIds = new Set(agents.map((agent) => agent.id));
   const callRows = (callsResult.data ?? []).filter((call) => activeAgentIds.has(call.agent_id));
-  if (callRows.length) {
+  const unmaskedContacts = new Map<string, string>();
+  if (context.permissions.has("contacts.view_unmasked") && callRows.length) {
     const unmasked = await admin.from("calls").select("id,contact_unmasked").in("id", callRows.map((call) => call.id));
-    if (!unmasked.error) {
-      const contacts = new Map((unmasked.data ?? []).map((call) => [call.id, call.contact_unmasked]));
-      for (const call of callRows) call.contact_masked = contacts.get(call.id) ?? call.contact_masked;
-    }
+    if (!unmasked.error) for (const row of unmasked.data ?? []) if (row.contact_unmasked) unmaskedContacts.set(row.id, row.contact_unmasked);
   }
   const chatRows = (chatsResult.data ?? []).filter((chat) => activeAgentIds.has(chat.agent_id));
   const chartStart = new Date(); chartStart.setUTCDate(chartStart.getUTCDate() - 6); chartStart.setUTCHours(0, 0, 0, 0);
@@ -59,7 +57,7 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
       { label: "Active agents", value: String(agentRows.length), change: "Global", detail: "voice and chat", positive: true }
     ], chart,
     agents: agentRows,
-    calls: callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Retell agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning", sessionId: call.provider_call_id, channel: call.direction ?? "phone_call", cost: call.provider_cost_minor == null ? "—" : `$${(Number(call.provider_cost_minor) / 100).toFixed(3)}`, endReason: call.disconnection_reason ?? undefined, sentiment: call.sentiment ?? undefined, status: call.status })),
+    calls: callRows.slice(0, 100).map((call) => ({ contact: unmaskedContacts.get(call.id) ?? call.contact_masked ?? "Caller", number: unmaskedContacts.get(call.id) ?? "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Retell agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning", sessionId: call.provider_call_id, channel: call.direction ?? "phone_call", cost: call.provider_cost_minor == null ? "—" : `$${(Number(call.provider_cost_minor) / 100).toFixed(3)}`, endReason: call.disconnection_reason ?? undefined, sentiment: call.sentiment ?? undefined, status: call.status })),
     chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Retell agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status, sessionId: chat.provider_chat_id, cost: chat.provider_cost_minor == null ? "—" : `$${(Number(chat.provider_cost_minor) / 100).toFixed(3)}`, sentiment: chat.sentiment ?? undefined })),
     team: (membershipsResult.data ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }),
     lastSyncedAt: new Date().toISOString(),
@@ -112,12 +110,10 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   if (accessResult?.error) throw new Error(`Dashboard access unavailable: ${accessResult.error.code}`);
   const allowedAgentIds = new Set(context.platformRoles.length && !viewingAnotherUser ? tenantAgentIds : (accessResult?.data ?? []).map((grant) => grant.agent_id));
   const callRows = (calls ?? []).filter((call) => allowedAgentIds.has(call.agent_id));
+  const unmaskedContacts = new Map<string, string>();
   if (dashboardPermissions.has("contacts.view_unmasked") && callRows.length) {
     const unmasked = await admin.from("calls").select("id,contact_unmasked").in("id", callRows.map((call) => call.id));
-    if (!unmasked.error) {
-      const contacts = new Map((unmasked.data ?? []).map((call) => [call.id, call.contact_unmasked]));
-      for (const call of callRows) call.contact_masked = contacts.get(call.id) ?? call.contact_masked;
-    }
+    if (!unmasked.error) for (const row of unmasked.data ?? []) if (row.contact_unmasked) unmaskedContacts.set(row.id, row.contact_unmasked);
   }
   const chatRows = (chats ?? []).filter((chat) => allowedAgentIds.has(chat.agent_id));
   const chartStart = new Date(); chartStart.setUTCDate(chartStart.getUTCDate() - 6); chartStart.setUTCHours(0, 0, 0, 0);
@@ -150,7 +146,7 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
       { label: "Active agents", value: String(agentRows.filter((agent) => agent.status === "active").length), change: "Assigned", detail: "to this workspace", positive: true }
     ], chart,
     agents: dashboardPermissions.has("agents.read") ? agentRows : [],
-    calls: dashboardPermissions.has("calls.read") ? callRows.slice(0, 100).map((call) => ({ contact: call.contact_masked ?? "Caller", number: "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning", sessionId: call.provider_call_id, channel: call.direction ?? "phone_call", cost: call.provider_cost_minor == null ? "—" : `$${(Number(call.provider_cost_minor) / 100).toFixed(3)}`, endReason: call.disconnection_reason ?? undefined, sentiment: call.sentiment ?? undefined, status: call.status })) : [],
+    calls: dashboardPermissions.has("calls.read") ? callRows.slice(0, 100).map((call) => ({ contact: unmaskedContacts.get(call.id) ?? call.contact_masked ?? "Caller", number: unmaskedContacts.get(call.id) ?? "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning", sessionId: call.provider_call_id, channel: call.direction ?? "phone_call", cost: call.provider_cost_minor == null ? "—" : `$${(Number(call.provider_cost_minor) / 100).toFixed(3)}`, endReason: call.disconnection_reason ?? undefined, sentiment: call.sentiment ?? undefined, status: call.status })) : [],
     chats: dashboardPermissions.has("chats.read") ? chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Assigned agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status, sessionId: chat.provider_chat_id, cost: chat.provider_cost_minor == null ? "—" : `$${(Number(chat.provider_cost_minor) / 100).toFixed(3)}`, sentiment: chat.sentiment ?? undefined })) : [],
     team: dashboardPermissions.has("members.read") ? (memberships ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }) : [],
     lastSyncedAt: new Date().toISOString(),
