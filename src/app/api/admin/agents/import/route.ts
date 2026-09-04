@@ -3,6 +3,12 @@ import { requireAuthorizationContext, requirePermission } from "@/lib/auth/conte
 import { listRetellAgents, listRetellContacts, listRetellHistory } from "@/lib/retell/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+// The full reconciliation pulls agents plus up to 1000 calls, chats and contacts
+// from Retell in one request. Vercel's default function budget cuts that short,
+// which aborts the run part-way and leaves newly imported agents unassigned.
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 async function upsertHistoryRows(admin: ReturnType<typeof createAdminClient>, table: "calls" | "chats" | "contacts", rows: Record<string, unknown>[], conflict: string) {
   if (!rows.length) return null;
   const firstAttempt = await admin.from(table).upsert(rows, { onConflict: conflict });
@@ -39,9 +45,14 @@ async function synchronizeRetellData(actorUserId: string | null) {
     if (error) return NextResponse.json({ error: "AGENT_IMPORT_FAILED" }, { status: 503 });
   }
   for (const [kind, current] of [["voice", agents.voice], ["chat", agents.chat]] as const) {
-    let stale = admin.from("retell_agents").update({ status: "inactive", updated_at: new Date().toISOString() }).eq("connection_id", connection.id).eq("kind", kind);
-    if (current.length) stale = stale.not("provider_agent_id", "in", `(${current.map((agent) => `"${agent.providerAgentId}"`).join(",")})`);
-    const { error } = await stale;
+    // An empty provider response is treated as a transient Retell failure, not as
+    // a deletion. Retiring on an empty list would close every tenant assignment
+    // and revoke every user grant for that channel.
+    if (!current.length) continue;
+    const { error } = await admin.from("retell_agents").update({ status: "inactive", updated_at: new Date().toISOString() })
+      .eq("connection_id", connection.id)
+      .eq("kind", kind)
+      .not("provider_agent_id", "in", `(${current.map((agent) => `"${agent.providerAgentId}"`).join(",")})`);
     if (error) return NextResponse.json({ error: "AGENT_RETIRE_FAILED" }, { status: 503 });
   }
   const { data: retiredAgents, error: retiredLookupError } = await admin.from("retell_agents").select("id").eq("connection_id", connection.id).eq("status", "inactive");
@@ -68,6 +79,7 @@ async function synchronizeRetellData(actorUserId: string | null) {
   const { data: automaticTenant, error: tenantLookupError } = await admin.from("tenants").select("id").eq("slug", "daiichi-technologies").eq("status", "active").maybeSingle();
   if (tenantLookupError) return NextResponse.json({ error: "TENANT_LOOKUP_FAILED" }, { status: 503 });
   if (!automaticTenant) return NextResponse.json({ error: "DAIICHI_TECHNOLOGIES_WORKSPACE_MISSING" }, { status: 503 });
+  let unassignedAfterAssignment = 0;
   {
     const automaticTenantId = automaticTenant.id;
     let assignmentActor = actorUserId;
@@ -78,13 +90,22 @@ async function synchronizeRetellData(actorUserId: string | null) {
     const unassignedAgents = (importedAgents ?? []).filter((agent) => !agent.agent_assignments?.some((assignment) => !assignment.valid_to));
     if (unassignedAgents.length && !assignmentActor) return NextResponse.json({ error: "AUTOMATIC_ASSIGNMENT_ACTOR_MISSING" }, { status: 503 });
     if (unassignedAgents.length) {
-      const { error: assignmentError } = await admin.from("agent_assignments").insert(unassignedAgents.map((agent) => ({ tenant_id: automaticTenantId, agent_id: agent.id, assigned_by: assignmentActor!, assignment_reason: "Automatically assigned from the Daiichi Technologies Retell workspace." })));
-      if (assignmentError && assignmentError.code !== "23505") return NextResponse.json({ error: "AUTOMATIC_AGENT_ASSIGNMENT_FAILED", code: assignmentError.code, detail: assignmentError.message }, { status: 503 });
+      // Each agent is assigned in its own statement. A multi-row insert is atomic,
+      // so one agent that a concurrent sync already assigned (23505 against
+      // agent_one_active_tenant_idx) would roll back the whole batch and silently
+      // leave every other new agent unassigned.
+      for (const agent of unassignedAgents) {
+        const { error: assignmentError } = await admin.from("agent_assignments").insert({ tenant_id: automaticTenantId, agent_id: agent.id, assigned_by: assignmentActor!, assignment_reason: "Automatically assigned from the Daiichi Technologies Retell workspace." });
+        if (assignmentError && assignmentError.code !== "23505") return NextResponse.json({ error: "AUTOMATIC_AGENT_ASSIGNMENT_FAILED", code: assignmentError.code, detail: assignmentError.message }, { status: 503 });
+      }
       const refreshed = await admin.from("retell_agents").select("id,provider_agent_id,connection_id,agent_assignments(tenant_id,valid_to)").eq("connection_id", connection.id).eq("status", "active");
       if (refreshed.error) return NextResponse.json({ error: "AGENT_ASSIGNMENT_REFRESH_FAILED" }, { status: 503 });
       importedAgents = refreshed.data;
       await admin.from("dashboard_refresh_signals").upsert({ tenant_id: automaticTenantId, resource: "agents", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
     }
+    // Every active agent must carry a workspace assignment before its calls can be
+    // attributed. Report any that do not instead of returning a successful sync.
+    unassignedAfterAssignment = (importedAgents ?? []).filter((agent) => !agent.agent_assignments?.some((assignment) => !assignment.valid_to)).length;
   }
   const history = await listRetellHistory();
   const contacts = await listRetellContacts();
@@ -118,7 +139,7 @@ async function synchronizeRetellData(actorUserId: string | null) {
   for (const tenantId of assignedTenantIds) await admin.from("dashboard_refresh_signals").upsert({ tenant_id: tenantId, resource: "agents", changed_at: new Date().toISOString() }, { onConflict: "tenant_id,resource" });
   await admin.from("retell_connections").update({ name: "Daiichi Technologies", last_sync_at: new Date().toISOString(), status: "active" }).eq("id", connection.id);
   await admin.from("audit_logs").insert({ actor_user_id: actorUserId, action: actorUserId ? "retell.agents.imported" : "retell.agents.scheduled_sync", target_type: "retell_connection", target_id: connection.id, safe_metadata: { voiceCount: agents.voice.length, chatCount: agents.chat.length } });
-  return NextResponse.json({ ok: true, voiceCount: agents.voice.length, chatCount: agents.chat.length, callCount: callRows.length, conversationCount: chatRows.length, contactCount: contacts.length });
+  return NextResponse.json({ ok: true, voiceCount: agents.voice.length, chatCount: agents.chat.length, callCount: callRows.length, conversationCount: chatRows.length, contactCount: contacts.length, unassignedAgentCount: unassignedAfterAssignment });
 }
 
 export async function POST() {
