@@ -9,10 +9,14 @@ const createSchema = z.object({
   email: z.string().trim().email().transform((value) => value.toLowerCase()),
   password: z.string().min(8).max(128)
 });
+// An empty field means "leave the password alone", so it has to become undefined
+// before the length check rather than failing validation as a short string.
+const optionalPassword = z.preprocess((value) => value === "" || value == null ? undefined : value, z.string().min(8).max(128).optional());
 const updateSchema = z.object({
   userId: z.string().uuid(), tenantId: z.string().uuid(),
   name: z.string().trim().min(2).max(100),
-  email: z.string().trim().email().transform((value) => value.toLowerCase())
+  email: z.string().trim().email().transform((value) => value.toLowerCase()),
+  password: optionalPassword
 });
 const removeSchema = z.object({ userId: z.string().uuid(), tenantId: z.string().uuid() });
 
@@ -49,11 +53,11 @@ export async function PATCH(request: Request) {
   const admin = createAdminClient();
   const { data: membership } = await admin.from("tenant_memberships").select("id").eq("tenant_id", parsed.data.tenantId).eq("user_id", parsed.data.userId).neq("status", "removed").maybeSingle();
   if (!membership) return NextResponse.json({ error: "USER_NOT_FOUND" }, { status: 404 });
-  const authUpdate = await admin.auth.admin.updateUserById(parsed.data.userId, { email: parsed.data.email, user_metadata: { display_name: parsed.data.name } });
+  const authUpdate = await admin.auth.admin.updateUserById(parsed.data.userId, { email: parsed.data.email, user_metadata: { display_name: parsed.data.name }, ...(parsed.data.password ? { password: parsed.data.password } : {}) });
   if (authUpdate.error) return NextResponse.json({ error: authUpdate.error.message }, { status: 409 });
   const profile = await admin.from("profiles").update({ display_name: parsed.data.name, email: parsed.data.email, updated_at: new Date().toISOString() }).eq("id", parsed.data.userId);
   if (profile.error) return NextResponse.json({ error: "USER_UPDATE_FAILED" }, { status: 503 });
-  await admin.from("audit_logs").insert({ tenant_id: parsed.data.tenantId, actor_user_id: context.userId, action: "client_user.updated", target_type: "profile", target_id: parsed.data.userId, safe_metadata: { email: parsed.data.email } });
+  await admin.from("audit_logs").insert({ tenant_id: parsed.data.tenantId, actor_user_id: context.userId, action: "client_user.updated", target_type: "profile", target_id: parsed.data.userId, safe_metadata: { email: parsed.data.email, passwordReset: Boolean(parsed.data.password) } });
   return NextResponse.json({ ok: true });
 }
 

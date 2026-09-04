@@ -31,7 +31,7 @@ export async function PATCH(request: Request) {
   const { data: role } = await admin.from("platform_role_assignments").select("id,role").eq("user_id", parsed.data.userId).in("role", ["super_admin", "operations_admin"]).is("revoked_at", null).maybeSingle();
   if (!role) return NextResponse.json({ error: "ADMIN_NOT_FOUND" }, { status: 404 });
   if ((role.role === "super_admin" || parsed.data.role === "super_admin") && !context.permissions.has("super_admin.manage")) return NextResponse.json({ error: "SUPER_ADMIN_ACCESS_REQUIRED" }, { status: 403 });
-  const auth = await admin.auth.admin.updateUserById(parsed.data.userId, { email: parsed.data.email, user_metadata: { display_name: parsed.data.name } });
+  const auth = await admin.auth.admin.updateUserById(parsed.data.userId, { email: parsed.data.email, user_metadata: { display_name: parsed.data.name }, ...(parsed.data.password ? { password: parsed.data.password } : {}) });
   if (auth.error) return NextResponse.json({ error: auth.error.message }, { status: 409 });
   const profile = await admin.from("profiles").update({ display_name: parsed.data.name, email: parsed.data.email, updated_at: new Date().toISOString() }).eq("id", parsed.data.userId);
   if (profile.error) return NextResponse.json({ error: "ADMIN_UPDATE_FAILED" }, { status: 503 });
@@ -39,7 +39,7 @@ export async function PATCH(request: Request) {
     const roleUpdate = await admin.from("platform_role_assignments").update({ role: parsed.data.role }).eq("id", role.id);
     if (roleUpdate.error) return NextResponse.json({ error: "ADMIN_ROLE_UPDATE_FAILED" }, { status: 503 });
   }
-  await admin.from("audit_logs").insert({ actor_user_id: context.userId, action: "platform_admin.updated", target_type: "profile", target_id: parsed.data.userId, safe_metadata: { email: parsed.data.email } });
+  await admin.from("audit_logs").insert({ actor_user_id: context.userId, action: "platform_admin.updated", target_type: "profile", target_id: parsed.data.userId, safe_metadata: { email: parsed.data.email, passwordReset: Boolean(parsed.data.password) } });
   return NextResponse.json({ ok: true });
 }
 
