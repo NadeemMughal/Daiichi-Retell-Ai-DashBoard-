@@ -2,10 +2,11 @@ import "server-only";
 import { z } from "zod";
 import { createRetellClient } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { missingColumnFrom, withoutColumn } from "@/lib/supabase/schema-drift";
+import { writeWithSchemaDrift } from "@/lib/supabase/schema-drift";
 
 const callSchema = z.object({
-  call_id: z.string(), agent_id: z.string(), call_status: z.string(), direction: z.string().optional(),
+  call_id: z.string(), agent_id: z.string(), call_status: z.string(), direction: z.string().optional(), call_type: z.string().optional(), agent_version: z.number().optional(),
+  latency: z.object({ e2e: z.object({ p50: z.number().optional() }).passthrough().optional() }).passthrough().optional(),
   start_timestamp: z.number().optional(), end_timestamp: z.number().optional(), duration_ms: z.number().optional(),
   disconnection_reason: z.string().optional(), from_number: z.string().optional(), to_number: z.string().optional(), transcript: z.string().optional(), recording_url: z.string().optional(), scrubbed_recording_url: z.string().optional(),
   call_analysis: z.object({ call_summary: z.string().optional(), user_sentiment: z.string().optional(), call_successful: z.boolean().optional(), custom_analysis_data: z.record(z.string(), z.unknown()).optional() }).optional(),
@@ -13,7 +14,7 @@ const callSchema = z.object({
 }).passthrough();
 
 const chatSchema = z.object({
-  chat_id: z.string(), agent_id: z.string(), chat_status: z.string(), start_timestamp: z.number().optional(), end_timestamp: z.number().optional(), transcript: z.string().optional(),
+  chat_id: z.string(), agent_id: z.string(), chat_status: z.string(), agent_version: z.number().optional(), start_timestamp: z.number().optional(), end_timestamp: z.number().optional(), transcript: z.string().optional(),
   message_with_tool_calls: z.array(z.object({ role: z.string() }).passthrough()).optional(),
   chat_analysis: z.object({ chat_summary: z.string().optional(), user_sentiment: z.string().optional(), chat_successful: z.boolean().optional(), custom_analysis_data: z.record(z.string(), z.unknown()).optional() }).optional(),
   chat_cost: z.object({ combined_cost: z.number().optional() }).passthrough().optional()
@@ -25,12 +26,9 @@ function timestamp(value?: number) { return value ? new Date(value).toISOString(
 // webhook, retries it five times and dead-letters it, silently stopping live
 // ingestion until the migration is applied.
 async function upsertSession(admin: ReturnType<typeof createAdminClient>, table: "calls" | "chats", row: Record<string, unknown>, conflict: string) {
-  const attempt = await admin.from(table).upsert(row, { onConflict: conflict });
-  const missing = missingColumnFrom(attempt.error);
-  if (!missing || !(missing in row)) return attempt;
-  const [reduced] = withoutColumn([row], missing);
-  console.warn("Retell webhook stored without an unavailable column", { table, column: missing });
-  return admin.from(table).upsert(reduced!, { onConflict: conflict });
+  const { result, dropped } = await writeWithSchemaDrift([row], (payload) => admin.from(table).upsert(payload, { onConflict: conflict }));
+  if (dropped.length) console.warn("Retell webhook stored without unavailable columns", { table, columns: dropped });
+  return result;
 }
 
 async function assignmentForProviderAgent(providerAgentId: string) {
@@ -56,8 +54,8 @@ export async function processRetellWebhookEvent(eventId: string, eventType: stri
       const custom = call.call_analysis?.custom_analysis_data;
       const synchronized = await upsertSession(admin, "calls", {
         tenant_id: context.tenantId, connection_id: context.agent.connection_id, agent_id: context.agent.id, provider_call_id: call.call_id,
-        status: call.call_status, direction: call.direction, started_at: timestamp(call.start_timestamp), ended_at: timestamp(call.end_timestamp), duration_ms: call.duration_ms,
-        disconnection_reason: call.disconnection_reason, contact_masked: "Protected caller", contact_unmasked: context.tenant?.contact_masking_enabled ? null : (call.direction === "outbound" ? call.to_number : call.from_number) ?? null, summary: call.call_analysis?.call_summary, sentiment: call.call_analysis?.user_sentiment,
+        status: call.call_status, call_type: call.call_type ?? (call.from_number ? "phone_call" : "web_call"), direction: call.direction === "inbound" || call.direction === "outbound" ? call.direction : null, agent_version: call.agent_version ?? null, latency_ms: call.latency?.e2e?.p50 == null ? null : Math.round(call.latency.e2e.p50), started_at: timestamp(call.start_timestamp), ended_at: timestamp(call.end_timestamp), duration_ms: call.duration_ms,
+        disconnection_reason: call.disconnection_reason, contact_masked: "Protected caller", contact_unmasked: context.tenant?.contact_masking_enabled ? null : (call.direction === "outbound" ? call.to_number : call.from_number) ?? null, from_number: context.tenant?.contact_masking_enabled ? null : call.from_number ?? null, to_number: context.tenant?.contact_masking_enabled ? null : call.to_number ?? null, custom_analysis: custom && Object.keys(custom).length ? custom : null, summary: call.call_analysis?.call_summary, sentiment: call.call_analysis?.user_sentiment,
         outcome: typeof custom?.outcome === "string" ? custom.outcome : call.call_analysis?.call_successful === true ? "Successful" : call.call_analysis?.call_successful === false ? "Unsuccessful" : null,
         transcript_text: context.tenant?.transcript_access_enabled ? call.transcript : null,
         recording_locator: context.tenant?.recording_access_enabled ? call.scrubbed_recording_url ?? call.recording_url : null,
@@ -71,7 +69,7 @@ export async function processRetellWebhookEvent(eventId: string, eventType: stri
       if (!context) { await admin.from("webhook_events").update({ status: "quarantined", last_error_code: "UNASSIGNED_AGENT" }).eq("id", eventId); return; }
       const custom = chat.chat_analysis?.custom_analysis_data;
       const synchronized = await upsertSession(admin, "chats", {
-        tenant_id: context.tenantId, connection_id: context.agent.connection_id, agent_id: context.agent.id, provider_chat_id: chat.chat_id, status: chat.chat_status,
+        tenant_id: context.tenantId, connection_id: context.agent.connection_id, agent_id: context.agent.id, provider_chat_id: chat.chat_id, status: chat.chat_status, agent_version: chat.agent_version ?? null, custom_analysis: custom && Object.keys(custom).length ? custom : null,
         started_at: timestamp(chat.start_timestamp), ended_at: timestamp(chat.end_timestamp), ai_message_count: (chat.message_with_tool_calls ?? []).filter((message) => message.role === "agent").length,
         summary: chat.chat_analysis?.chat_summary, sentiment: chat.chat_analysis?.user_sentiment,
         outcome: typeof custom?.outcome === "string" ? custom.outcome : chat.chat_analysis?.chat_successful === true ? "Successful" : chat.chat_analysis?.chat_successful === false ? "Unsuccessful" : null,

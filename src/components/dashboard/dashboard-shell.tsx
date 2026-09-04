@@ -72,9 +72,9 @@ export type DashboardDataset = {
   userName: string;
   metrics: typeof previewMetrics;
   chart: typeof previewChartData;
-  calls: Array<{ contact: string; number: string; agentId?: string; agent: string; outcome: string; duration: string; time: string; startedAt?: string; tone: string; sessionId?: string; channel?: string; cost?: string; endReason?: string; sentiment?: string; status?: string }>;
+  calls: Array<{ contact: string; number: string; agentId?: string; agent: string; outcome: string; duration: string; time: string; startedAt?: string; tone: string; sessionId?: string; channel?: string; direction?: string; fromNumber?: string; toNumber?: string; latencyMs?: number; agentVersion?: number; summary?: string; custom?: Record<string, string>; cost?: string; endReason?: string; sentiment?: string; status?: string }>;
   agents: Array<{ id: string; providerId?: string; version?: number; name: string; kind: "voice" | "chat"; calls: number; chats: number; score: string; status: string; modifiedAt?: string }>;
-  chats: Array<{ id: string; agentId?: string; agent: string; outcome: string; messages: number; time: string; startedAt?: string; status: string; sessionId?: string; cost?: string; sentiment?: string }>;
+  chats: Array<{ id: string; agentId?: string; agent: string; outcome: string; messages: number; time: string; startedAt?: string; status: string; sessionId?: string; agentVersion?: number; summary?: string; custom?: Record<string, string>; cost?: string; sentiment?: string }>;
   team: Array<{ name: string; email: string; role: string; status: string }>;
   lastSyncedAt: string;
   allowedViews: string[];
@@ -194,7 +194,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
       </aside>
 
       <main className={cn("min-w-0", preview && "pt-8")}>
-        <header className="sticky top-0 z-30 flex h-[76px] items-center gap-4 border-b border-[#173f3314] bg-[#f4f6f2dd] px-5 backdrop-blur-xl md:px-8">
+        <header className="sticky top-0 z-30 flex h-[76px] items-center gap-4 border-b border-[#173f3314] bg-[#f4f6f2] px-5 md:px-8">
           <button aria-label="Open menu" onClick={() => setMobileOpen(true)} className="rounded-xl border border-[#173f331a] bg-white p-2.5 lg:hidden"><Menu className="size-5" /></button>
           {active === "Home" && <div className="relative min-w-0 max-w-sm flex-1">
             <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[#70827c]" />
@@ -207,7 +207,7 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
         </header>
 
         <div className="mx-auto max-w-[1500px] p-5 md:p-8 xl:p-10">
-          <section className="relative z-[80] flex flex-col justify-between gap-5 md:flex-row md:items-end">
+          <section className="relative z-10 flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div><p className="mb-2 text-xs font-bold uppercase tracking-[.18em] text-[#1f7659]">Performance command center</p><h1 className="text-3xl font-semibold tracking-[-.04em] md:text-4xl">{active === "Home" ? `Welcome, ${dashboard.userName}.` : active}</h1><p className="mt-2 text-sm text-[#687a74]">Live, tenant-isolated Retell reporting for {dashboard.tenantName}.</p></div>
           </section>
 

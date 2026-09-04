@@ -24,7 +24,8 @@ const migrations = [
   "supabase/migrations/0007_dashboard_realtime_signals.sql",
   "supabase/migrations/0008_contact_privacy_and_effective_roles.sql",
   "supabase/migrations/0009_agent_realtime_signals.sql",
-  "supabase/migrations/0010_retell_contacts.sql"
+  "supabase/migrations/0010_retell_contacts.sql",
+  "supabase/migrations/0011_session_export_fields.sql"
 ];
 // duplicate table, object, schema and function. Re-running must not abort the rest.
 const alreadyApplied = new Set(["42P07", "42710", "42P06", "42723"]);

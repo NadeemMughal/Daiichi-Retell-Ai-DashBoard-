@@ -5,8 +5,48 @@ import { requireAuthorizationContext, requirePermission } from "@/lib/auth/conte
 import { applyPermissionOverrides, applyTenantDataFlags, dashboardViewsForPermissions, permissionsForTenantRole, type TenantRole } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { listRetellPhoneNumbers } from "@/lib/retell/client";
+import type { PostgrestError } from "@supabase/supabase-js";
+import { missingSelectColumnFrom } from "@/lib/supabase/schema-drift";
+
+// Columns that have existed since the foundation migration, and the export
+// columns 0011 adds. Naming a column the deployed schema lacks fails the whole
+// select with 42703, so an unapplied migration must cost those columns only
+// instead of blanking the dashboard.
+const callBaseColumns = "id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,summary,provider_cost_minor,disconnection_reason,sentiment";
+const callExportColumns = "call_type,from_number,to_number,latency_ms,agent_version,custom_analysis";
+const chatBaseColumns = "id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,summary,provider_cost_minor,sentiment";
+const chatExportColumns = "agent_version,custom_analysis";
+
+type CallRow = {
+  id: string; provider_call_id: string | null; agent_id: string; status: string; direction: string | null; started_at: string | null;
+  duration_ms: number | null; outcome: string | null; contact_masked: string | null; summary: string | null; provider_cost_minor: number | null;
+  disconnection_reason: string | null; sentiment: string | null;
+  call_type?: string | null; from_number?: string | null; to_number?: string | null; latency_ms?: number | null; agent_version?: number | null; custom_analysis?: unknown;
+};
+type ChatRow = {
+  id: string; provider_chat_id: string | null; agent_id: string; status: string; started_at: string | null; ai_message_count: number;
+  outcome: string | null; summary: string | null; provider_cost_minor: number | null; sentiment: string | null;
+  agent_version?: number | null; custom_analysis?: unknown;
+};
+
+async function selectWithOptionalColumns<Row>(run: (columns: string) => PromiseLike<{ data: unknown; error: PostgrestError | null }>, base: string, optional: string): Promise<{ data: Row[] | null; error: PostgrestError | null }> {
+  const attempt = await run(`${base},${optional}`);
+  const result = missingSelectColumnFrom(attempt.error) ? await run(base) : attempt;
+  return { data: (result.data ?? null) as Row[] | null, error: result.error };
+}
 
 function dayKey(date: Date) { return date.toISOString().slice(0, 10); }
+
+// Rows written before 0011 stored the channel in direction, so the channel is
+// recovered from either column and direction is reported only when it really is
+// a caller direction.
+function channelOf(call: { call_type?: string | null; direction?: string | null }) { return call.call_type ?? (call.direction === "web_call" ? "web_call" : "phone_call"); }
+function directionOf(call: { direction?: string | null }) { return call.direction === "inbound" || call.direction === "outbound" ? call.direction : undefined; }
+function customFields(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, item]) => item != null && item !== "").map(([key, item]) => [key, typeof item === "string" ? item : JSON.stringify(item)] as const);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
 
 export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const context = await requireAuthorizationContext();
@@ -16,8 +56,8 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
   const [profileResult, agentsResult, callsResult, chatsResult, membershipsResult] = await Promise.all([
     admin.from("profiles").select("display_name,email").eq("id", context.userId).single(),
     admin.from("retell_agents").select("id,provider_agent_id,display_name,kind,status,provider_version,provider_updated_at").eq("status", "active").order("display_name"),
-    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
-    admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000),
+    selectWithOptionalColumns<CallRow>((columns) => admin.from("calls").select(columns).not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000), callBaseColumns, callExportColumns),
+    selectWithOptionalColumns<ChatRow>((columns) => admin.from("chats").select(columns).not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(5000), chatBaseColumns, chatExportColumns),
     admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").neq("status", "removed")
   ]);
   const failedQuery = [profileResult, agentsResult, callsResult, chatsResult, membershipsResult].find((result) => result.error);
@@ -57,8 +97,8 @@ export async function loadOwnerDashboard(): Promise<DashboardDataset> {
       { label: "Active agents", value: String(agentRows.length), change: "Global", detail: "voice and chat", positive: true }
     ], chart,
     agents: agentRows,
-    calls: callRows.slice(0, 100).map((call) => ({ contact: unmaskedContacts.get(call.id) ?? call.contact_masked ?? "Caller", number: unmaskedContacts.get(call.id) ?? "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Retell agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning", sessionId: call.provider_call_id, channel: call.direction ?? "phone_call", cost: call.provider_cost_minor == null ? "—" : `$${(Number(call.provider_cost_minor) / 100).toFixed(3)}`, endReason: call.disconnection_reason ?? undefined, sentiment: call.sentiment ?? undefined, status: call.status })),
-    chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Retell agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status, sessionId: chat.provider_chat_id, cost: chat.provider_cost_minor == null ? "—" : `$${(Number(chat.provider_cost_minor) / 100).toFixed(3)}`, sentiment: chat.sentiment ?? undefined })),
+    calls: callRows.slice(0, 100).map((call) => ({ contact: unmaskedContacts.get(call.id) ?? call.contact_masked ?? "Caller", number: unmaskedContacts.get(call.id) ?? call.from_number ?? call.to_number ?? "", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Retell agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning", sessionId: call.provider_call_id ?? undefined, channel: channelOf(call), direction: directionOf(call), fromNumber: call.from_number ?? undefined, toNumber: call.to_number ?? undefined, latencyMs: call.latency_ms ?? undefined, agentVersion: call.agent_version ?? undefined, summary: call.summary ?? undefined, custom: customFields(call.custom_analysis), cost: call.provider_cost_minor == null ? "—" : `$${(Number(call.provider_cost_minor) / 100).toFixed(3)}`, endReason: call.disconnection_reason ?? undefined, sentiment: call.sentiment ?? undefined, status: call.status })),
+    chats: chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Retell agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status, sessionId: chat.provider_chat_id ?? undefined, agentVersion: chat.agent_version ?? undefined, summary: chat.summary ?? undefined, custom: customFields(chat.custom_analysis), cost: chat.provider_cost_minor == null ? "—" : `$${(Number(chat.provider_cost_minor) / 100).toFixed(3)}`, sentiment: chat.sentiment ?? undefined })),
     team: (membershipsResult.data ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }),
     lastSyncedAt: new Date().toISOString(),
     allowedViews: dashboardViewsForPermissions(context.permissions),
@@ -91,8 +131,8 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
   const [tenantResult, profileResult, callsResult, chatsResult, assignmentsResult, membershipsResult] = await Promise.all([
     admin.from("tenants").select("display_name").eq("id", context.tenantId).single(),
     admin.from("profiles").select("display_name,email").eq("id", dashboardUserId).single(),
-    admin.from("calls").select("id,provider_call_id,agent_id,status,direction,started_at,duration_ms,outcome,contact_masked,provider_cost_minor,disconnection_reason,sentiment").eq("tenant_id", context.tenantId).not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
-    admin.from("chats").select("id,provider_chat_id,agent_id,status,started_at,ai_message_count,outcome,provider_cost_minor,sentiment").eq("tenant_id", context.tenantId).not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000),
+    selectWithOptionalColumns<CallRow>((columns) => admin.from("calls").select(columns).eq("tenant_id", context.tenantId).not("provider_call_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000), callBaseColumns, callExportColumns),
+    selectWithOptionalColumns<ChatRow>((columns) => admin.from("chats").select(columns).eq("tenant_id", context.tenantId).not("provider_chat_id", "like", "sample_%").gte("started_at", periodStart.toISOString()).order("started_at", { ascending: false }).limit(1000), chatBaseColumns, chatExportColumns),
     admin.from("agent_assignments").select("agent_id,retell_agents(id,provider_agent_id,display_name,kind,status,provider_version,provider_updated_at)").eq("tenant_id", context.tenantId).is("valid_to", null),
     admin.from("tenant_memberships").select("role,status,member:profiles!tenant_memberships_user_id_fkey(display_name,email)").eq("tenant_id", context.tenantId).neq("status", "removed")
   ]);
@@ -146,8 +186,8 @@ export async function loadDashboard(tenantSlug: string, effectiveUserId?: string
       { label: "Active agents", value: String(agentRows.filter((agent) => agent.status === "active").length), change: "Assigned", detail: "to this workspace", positive: true }
     ], chart,
     agents: dashboardPermissions.has("agents.read") ? agentRows : [],
-    calls: dashboardPermissions.has("calls.read") ? callRows.slice(0, 100).map((call) => ({ contact: unmaskedContacts.get(call.id) ?? call.contact_masked ?? "Caller", number: unmaskedContacts.get(call.id) ?? "Protected contact", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning", sessionId: call.provider_call_id, channel: call.direction ?? "phone_call", cost: call.provider_cost_minor == null ? "—" : `$${(Number(call.provider_cost_minor) / 100).toFixed(3)}`, endReason: call.disconnection_reason ?? undefined, sentiment: call.sentiment ?? undefined, status: call.status })) : [],
-    chats: dashboardPermissions.has("chats.read") ? chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Assigned agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status, sessionId: chat.provider_chat_id, cost: chat.provider_cost_minor == null ? "—" : `$${(Number(chat.provider_cost_minor) / 100).toFixed(3)}`, sentiment: chat.sentiment ?? undefined })) : [],
+    calls: dashboardPermissions.has("calls.read") ? callRows.slice(0, 100).map((call) => ({ contact: unmaskedContacts.get(call.id) ?? call.contact_masked ?? "Caller", number: unmaskedContacts.get(call.id) ?? call.from_number ?? call.to_number ?? "", agentId: call.agent_id, agent: agentRows.find((agent) => agent.id === call.agent_id)?.name ?? "Assigned agent", outcome: call.outcome ?? call.status, duration: `${Math.floor(Number(call.duration_ms ?? 0) / 60000)}:${String(Math.floor(Number(call.duration_ms ?? 0) / 1000) % 60).padStart(2, "0")}`, time: call.started_at ? new Date(call.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: call.started_at ?? undefined, tone: /book|qualif|success|resolved/i.test(call.outcome ?? "") ? "success" : "warning", sessionId: call.provider_call_id ?? undefined, channel: channelOf(call), direction: directionOf(call), fromNumber: call.from_number ?? undefined, toNumber: call.to_number ?? undefined, latencyMs: call.latency_ms ?? undefined, agentVersion: call.agent_version ?? undefined, summary: call.summary ?? undefined, custom: customFields(call.custom_analysis), cost: call.provider_cost_minor == null ? "—" : `$${(Number(call.provider_cost_minor) / 100).toFixed(3)}`, endReason: call.disconnection_reason ?? undefined, sentiment: call.sentiment ?? undefined, status: call.status })) : [],
+    chats: dashboardPermissions.has("chats.read") ? chatRows.slice(0, 100).map((chat) => ({ id: chat.id, agentId: chat.agent_id, agent: agentRows.find((agent) => agent.id === chat.agent_id)?.name ?? "Assigned agent", outcome: chat.outcome ?? "No outcome yet", messages: chat.ai_message_count, time: chat.started_at ? new Date(chat.started_at).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—", startedAt: chat.started_at ?? undefined, status: chat.status, sessionId: chat.provider_chat_id ?? undefined, agentVersion: chat.agent_version ?? undefined, summary: chat.summary ?? undefined, custom: customFields(chat.custom_analysis), cost: chat.provider_cost_minor == null ? "—" : `$${(Number(chat.provider_cost_minor) / 100).toFixed(3)}`, sentiment: chat.sentiment ?? undefined })) : [],
     team: dashboardPermissions.has("members.read") ? (memberships ?? []).map((membership) => { const member = Array.isArray(membership.member) ? membership.member[0] : membership.member; return { name: member?.display_name ?? "Workspace member", email: member?.email ?? "", role: membership.role, status: membership.status }; }) : [],
     lastSyncedAt: new Date().toISOString(),
     allowedViews,

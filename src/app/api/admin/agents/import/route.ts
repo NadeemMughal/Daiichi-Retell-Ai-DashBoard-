@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuthorizationContext, requirePermission } from "@/lib/auth/context";
 import { listRetellAgents, listRetellContacts, listRetellHistory } from "@/lib/retell/client";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { missingColumnFrom, withoutColumn } from "@/lib/supabase/schema-drift";
+import { writeWithSchemaDrift } from "@/lib/supabase/schema-drift";
 
 // The full reconciliation pulls agents plus up to 1000 calls, chats and contacts
 // from Retell in one request. Vercel's default function budget cuts that short,
@@ -12,16 +12,12 @@ export const maxDuration = 60;
 
 async function upsertHistoryRows(admin: ReturnType<typeof createAdminClient>, table: "calls" | "chats" | "contacts", rows: Record<string, unknown>[], conflict: string, drift: string[]) {
   if (!rows.length) return null;
-  const firstAttempt = await admin.from(table).upsert(rows, { onConflict: conflict });
-  if (!firstAttempt.error) return null;
-  // An unapplied additive migration must not stop history from synchronizing.
-  // The column is dropped from the payload and reported back to the caller.
-  const missing = missingColumnFrom(firstAttempt.error);
-  if (missing && rows.some((row) => missing in row)) {
-    const reduced = await admin.from(table).upsert(withoutColumn(rows, missing), { onConflict: conflict });
-    if (!reduced.error) drift.push(`${table}.${missing}`);
-    return reduced.error;
-  }
+  // An unapplied additive migration must not stop history from synchronizing. One
+  // migration adds several columns at once, so every missing column is dropped in
+  // turn and reported back to the caller rather than only the first.
+  const { result: firstAttempt, dropped } = await writeWithSchemaDrift(rows, (payload) => admin.from(table).upsert(payload, { onConflict: conflict }));
+  if (!firstAttempt.error) { for (const column of dropped) drift.push(`${table}.${column}`); return null; }
+  if (dropped.length) return firstAttempt.error;
   // A short retry handles transient PostgREST/database interruptions without
   // making the operator press Sync again. Deterministic validation failures
   // are returned unchanged on the second attempt.
@@ -50,8 +46,8 @@ async function synchronizeRetellData(actorUserId: string | null) {
   }
   const agents = await listRetellAgents();
   const normalized = [
-    ...agents.voice.map((agent) => ({ connection_id: connection.id, provider_agent_id: agent.providerAgentId, kind: "voice", display_name: agent.displayName, provider_updated_at: new Date(agent.modifiedAt).toISOString(), status: "active", updated_at: new Date().toISOString() })),
-    ...agents.chat.map((agent) => ({ connection_id: connection.id, provider_agent_id: agent.providerAgentId, kind: "chat", display_name: agent.displayName, provider_updated_at: new Date(agent.modifiedAt).toISOString(), status: "active", updated_at: new Date().toISOString() }))
+    ...agents.voice.map((agent) => ({ connection_id: connection.id, provider_agent_id: agent.providerAgentId, kind: "voice", display_name: agent.displayName, provider_version: agent.version, provider_updated_at: new Date(agent.modifiedAt).toISOString(), status: "active", updated_at: new Date().toISOString() })),
+    ...agents.chat.map((agent) => ({ connection_id: connection.id, provider_agent_id: agent.providerAgentId, kind: "chat", display_name: agent.displayName, provider_version: agent.version, provider_updated_at: new Date(agent.modifiedAt).toISOString(), status: "active", updated_at: new Date().toISOString() }))
   ];
   if (normalized.length) {
     // 0003_agent_provider_identity.sql makes (connection_id, provider_agent_id)
@@ -144,8 +140,15 @@ async function synchronizeRetellData(actorUserId: string | null) {
     if (!("from_number" in call)) return null;
     return (call.direction === "outbound" ? call.to_number : call.from_number) ?? null;
   };
-  const callRows = history.calls.flatMap((call) => { const owner = agentContext.get(call.agent_id); if (!owner) return []; const analysis = call.call_analysis; const custom = analysis?.custom_analysis_data as Record<string, unknown> | undefined; return [{ tenant_id: owner.tenantId, connection_id: owner.connectionId, agent_id: owner.id, provider_call_id: call.call_id, status: call.call_status, direction: "direction" in call ? call.direction : "web_call", started_at: call.start_timestamp ? new Date(call.start_timestamp).toISOString() : null, ended_at: call.end_timestamp ? new Date(call.end_timestamp).toISOString() : null, duration_ms: call.duration_ms ?? null, disconnection_reason: call.disconnection_reason ?? null, contact_masked: "Protected caller", contact_unmasked: contactFor(call, owner.tenantId), summary: analysis?.call_summary ?? null, sentiment: analysis?.user_sentiment ?? null, outcome: typeof custom?.outcome === "string" ? custom.outcome : analysis?.call_successful === true ? "Successful" : analysis?.call_successful === false ? "Unsuccessful" : null, provider_cost_minor: call.call_cost?.combined_cost == null ? null : Math.round(call.call_cost.combined_cost), synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString() }]; });
-  const chatRows = history.chats.flatMap((chat) => { const owner = agentContext.get(chat.agent_id); if (!owner) return []; const analysis = chat.chat_analysis; const custom = analysis?.custom_analysis_data as Record<string, unknown> | undefined; return [{ tenant_id: owner.tenantId, connection_id: owner.connectionId, agent_id: owner.id, provider_chat_id: chat.chat_id, status: chat.chat_status, started_at: chat.start_timestamp ? new Date(chat.start_timestamp).toISOString() : null, ended_at: chat.end_timestamp ? new Date(chat.end_timestamp).toISOString() : null, ai_message_count: (chat.message_with_tool_calls ?? []).filter((message) => message.role === "agent").length, summary: analysis?.chat_summary ?? null, sentiment: analysis?.user_sentiment ?? null, outcome: typeof custom?.outcome === "string" ? custom.outcome : analysis?.chat_successful === true ? "Successful" : analysis?.chat_successful === false ? "Unsuccessful" : null, provider_cost_minor: chat.chat_cost?.combined_cost == null ? null : Math.round(chat.chat_cost.combined_cost), synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString() }]; });
+  // Both endpoints of a phone call are caller identifiers, so they carry the same
+  // sensitivity as contact_unmasked and stay out of the row while masking is on.
+  const numberFor = (call: (typeof history.calls)[number], tenantId: string, end: "from" | "to") => {
+    if (maskingByTenant.get(tenantId) !== false) return null;
+    if (!("from_number" in call)) return null;
+    return (end === "from" ? call.from_number : call.to_number) ?? null;
+  };
+  const callRows = history.calls.flatMap((call) => { const owner = agentContext.get(call.agent_id); if (!owner) return []; const analysis = call.call_analysis; const custom = analysis?.custom_analysis_data as Record<string, unknown> | undefined; return [{ tenant_id: owner.tenantId, connection_id: owner.connectionId, agent_id: owner.id, provider_call_id: call.call_id, status: call.call_status, call_type: call.call_type ?? ("from_number" in call ? "phone_call" : "web_call"), direction: "direction" in call ? call.direction : null, agent_version: call.agent_version ?? null, latency_ms: call.latency?.e2e?.p50 == null ? null : Math.round(call.latency.e2e.p50), started_at: call.start_timestamp ? new Date(call.start_timestamp).toISOString() : null, ended_at: call.end_timestamp ? new Date(call.end_timestamp).toISOString() : null, duration_ms: call.duration_ms ?? null, disconnection_reason: call.disconnection_reason ?? null, contact_masked: "Protected caller", contact_unmasked: contactFor(call, owner.tenantId), from_number: numberFor(call, owner.tenantId, "from"), to_number: numberFor(call, owner.tenantId, "to"), custom_analysis: custom && Object.keys(custom).length ? custom : null, summary: analysis?.call_summary ?? null, sentiment: analysis?.user_sentiment ?? null, outcome: typeof custom?.outcome === "string" ? custom.outcome : analysis?.call_successful === true ? "Successful" : analysis?.call_successful === false ? "Unsuccessful" : null, provider_cost_minor: call.call_cost?.combined_cost == null ? null : Math.round(call.call_cost.combined_cost), synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString() }]; });
+  const chatRows = history.chats.flatMap((chat) => { const owner = agentContext.get(chat.agent_id); if (!owner) return []; const analysis = chat.chat_analysis; const custom = analysis?.custom_analysis_data as Record<string, unknown> | undefined; return [{ tenant_id: owner.tenantId, connection_id: owner.connectionId, agent_id: owner.id, provider_chat_id: chat.chat_id, status: chat.chat_status, custom_analysis: custom && Object.keys(custom).length ? custom : null, started_at: chat.start_timestamp ? new Date(chat.start_timestamp).toISOString() : null, ended_at: chat.end_timestamp ? new Date(chat.end_timestamp).toISOString() : null, ai_message_count: (chat.message_with_tool_calls ?? []).filter((message) => message.role === "agent").length, summary: analysis?.chat_summary ?? null, sentiment: analysis?.user_sentiment ?? null, outcome: typeof custom?.outcome === "string" ? custom.outcome : analysis?.chat_successful === true ? "Successful" : analysis?.chat_successful === false ? "Unsuccessful" : null, provider_cost_minor: chat.chat_cost?.combined_cost == null ? null : Math.round(chat.chat_cost.combined_cost), synchronized_at: new Date().toISOString(), updated_at: new Date().toISOString() }]; });
   const callImportError = await upsertHistoryRows(admin, "calls", callRows, "connection_id,provider_call_id", schemaDrift);
   if (callImportError) return NextResponse.json({ error: "CALL_HISTORY_IMPORT_FAILED", code: callImportError.code, detail: callImportError.message }, { status: 503 });
   const chatImportError = await upsertHistoryRows(admin, "chats", chatRows, "connection_id,provider_chat_id", schemaDrift);

@@ -32,7 +32,10 @@ export function useViewportClamp<T extends HTMLElement>(open: boolean, gutter = 
       node.style.maxHeight = "";
 
       const viewportWidth = document.documentElement.clientWidth;
-      const viewportHeight = window.innerHeight;
+      // clientHeight, not innerHeight: innerHeight counts the strip hidden behind
+      // mobile browser chrome, so a panel sized against it runs off the bottom of
+      // the screen. It also keeps both axes measured against the same viewport.
+      const viewportHeight = document.documentElement.clientHeight;
       const availableWidth = viewportWidth - gutter * 2;
       if (node.getBoundingClientRect().width > availableWidth) node.style.maxWidth = `${availableWidth}px`;
 
@@ -70,10 +73,18 @@ export function useViewportClamp<T extends HTMLElement>(open: boolean, gutter = 
       node.style.maxHeight = `${Math.round(Math.max(200, roomBelow))}px`;
     };
     clamp();
+    // The first pass runs before the browser has settled the panel's final box,
+    // and a panel measured as short enough keeps its authored position for good.
+    // Re-running on the next two frames catches that. A ResizeObserver would be
+    // the obvious tool and is the wrong one: the clamp writes max-height, which
+    // resizes the very box being observed, so it would feed itself.
+    const frames: number[] = [];
+    frames.push(requestAnimationFrame(() => { clamp(); frames.push(requestAnimationFrame(clamp)); }));
     window.addEventListener("resize", clamp);
     window.addEventListener("orientationchange", clamp);
     window.addEventListener("scroll", clamp, true);
     return () => {
+      for (const frame of frames) cancelAnimationFrame(frame);
       window.removeEventListener("resize", clamp);
       window.removeEventListener("orientationchange", clamp);
       window.removeEventListener("scroll", clamp, true);

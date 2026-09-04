@@ -18,7 +18,7 @@ export async function listRetellAgents() {
     client.agent.list(channelFilter("voice")),
     client.chatAgent.list(channelFilter("chat"))
   ]);
-  const unique = <T extends { agent_id: string; agent_name: string; user_modified_timestamp: number }>(items: T[], fallback: string) => [...new Map(items.sort((a, b) => b.user_modified_timestamp - a.user_modified_timestamp).map((agent) => [agent.agent_id, { providerAgentId: agent.agent_id, displayName: agent.agent_name || fallback, modifiedAt: agent.user_modified_timestamp }])).values()];
+  const unique = <T extends { agent_id: string; agent_name: string; user_modified_timestamp: number; version?: number }>(items: T[], fallback: string) => [...new Map(items.sort((a, b) => b.user_modified_timestamp - a.user_modified_timestamp).map((agent) => [agent.agent_id, { providerAgentId: agent.agent_id, displayName: agent.agent_name || fallback, modifiedAt: agent.user_modified_timestamp, version: agent.version ?? null }])).values()];
   return {
     voice: unique(voice.items ?? [], "Unnamed voice agent"),
     chat: unique(chat.items ?? [], "Unnamed chat agent")
