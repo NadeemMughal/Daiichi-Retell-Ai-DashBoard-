@@ -69,20 +69,17 @@ button:disabled { cursor: not-allowed; }
   animation: target-pulse 1.4s ease-out both;
 }
 
+/* No backdrop-filter here on purpose. It makes every card both a containing
+   block and a stacking context, which traps popovers inside the card: a panel
+   using position: fixed resolves against the card rather than the viewport, and
+   its z-index cannot lift it above the page header or any other rooted layer.
+   The card is already a translucent white over a soft gradient, so the blur
+   added very little and cost an expensive paint on every scroll.
+   Restoring it means rendering the popovers through a portal instead. */
 .glass {
   background: var(--card);
   border: 1px solid var(--line);
   box-shadow: 0 18px 45px rgba(28, 64, 52, 0.07);
-  backdrop-filter: blur(18px);
-}
-
-/* backdrop-filter makes every card a containing block, so a descendant using
-   position: fixed resolves against the card instead of the viewport. Below the
-   sm breakpoint the date range panel and other sheets rely on being pinned to
-   the viewport, so the blur is dropped there. It is decorative, and skipping it
-   also removes an expensive paint on phones. */
-@media (max-width: 639px) {
-  .glass { backdrop-filter: none; }
 }
 
 /* History and contact filter panels must escape their cards instead of being clipped. */

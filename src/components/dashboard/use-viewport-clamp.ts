@@ -50,13 +50,24 @@ export function useViewportClamp<T extends HTMLElement>(open: boolean, gutter = 
       const anchor = node.offsetParent?.getBoundingClientRect();
       const roomBelow = viewportHeight - rect.top - gutter;
       const roomAbove = (anchor ? anchor.top : rect.top) - gutter;
-      if (anchor && roomBelow < 280 && roomAbove > roomBelow) {
+      const fullHeight = viewportHeight - gutter * 2;
+      if (rect.height <= roomBelow) return;
+      if (anchor && Math.min(rect.height, fullHeight) <= roomAbove) {
         node.style.top = "auto";
         node.style.bottom = "calc(100% + 10px)";
-        node.style.maxHeight = `${Math.round(Math.max(200, roomAbove))}px`;
-      } else if (rect.height > roomBelow) {
-        node.style.maxHeight = `${Math.round(Math.max(200, roomBelow))}px`;
+        node.style.maxHeight = `${Math.round(roomAbove)}px`;
+        return;
       }
+      // A trigger halfway down the page leaves too little room on either side, so
+      // the panel stops tracking it and uses the height of the window instead.
+      // The page is scroll-locked while a panel is open, so this stays put.
+      if (anchor && fullHeight > roomBelow) {
+        node.style.top = `${Math.round(gutter - anchor.top)}px`;
+        node.style.bottom = "auto";
+        node.style.maxHeight = `${Math.round(fullHeight)}px`;
+        return;
+      }
+      node.style.maxHeight = `${Math.round(Math.max(200, roomBelow))}px`;
     };
     clamp();
     window.addEventListener("resize", clamp);
