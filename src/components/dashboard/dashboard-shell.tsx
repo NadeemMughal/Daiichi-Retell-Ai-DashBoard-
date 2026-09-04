@@ -83,6 +83,9 @@ export type DashboardDataset = {
   phoneNumbers?: Array<{ number: string; prettyNumber: string; nickname: string; type: string; inboundAgentIds: string[]; outboundAgentIds: string[]; modifiedAt: string }>;
 };
 
+// Matches the throttle in /api/dashboard/sync so a tick has work to claim.
+const DASHBOARD_TICK_MS = 30_000;
+
 const metricIcons = [Phone, CalendarCheck, Clock3, Headphones] as const;
 
 const previewAgents = [
@@ -124,10 +127,28 @@ export function DashboardShell({ preview = false, data, initialView = "Overview"
   );
   useEffect(() => {
     if (preview) return;
-    const refresh = () => { if (document.visibilityState === "visible") router.refresh(); };
-    const timer = window.setInterval(refresh, 20_000);
-    window.addEventListener("focus", refresh);
-    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+    let ticking = false;
+    // Pull Retell into Supabase before re-reading the page, so a tick shows the
+    // calls and agents that arrived since the last one instead of the snapshot
+    // taken before them. The endpoint throttles itself, so several open
+    // dashboards still cost one reconciliation per interval between them.
+    const tick = async () => {
+      if (document.visibilityState !== "visible" || ticking) return;
+      ticking = true;
+      try {
+        await fetch("/api/dashboard/sync", { method: "POST", cache: "no-store" });
+      } catch {
+        // A failed tick must not stop the page from re-reading what is already
+        // stored, nor prevent the next tick from trying again.
+      } finally {
+        ticking = false;
+        router.refresh();
+      }
+    };
+    const run = () => { void tick(); };
+    const timer = window.setInterval(run, DASHBOARD_TICK_MS);
+    window.addEventListener("focus", run);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", run); };
   }, [preview, router]);
   useEffect(() => {
     if (!mobileOpen) return;

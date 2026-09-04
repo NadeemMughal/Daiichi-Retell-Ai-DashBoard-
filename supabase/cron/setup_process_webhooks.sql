@@ -1,3 +1,6 @@
+-- NOTE: vercel.json also declares this job. Install this script only if the
+-- deployment is not on Vercel, or remove the crons from vercel.json first.
+
 -- Run this once in the Supabase SQL Editor AFTER the production Vercel URL is
 -- available. Replace both placeholder values before running it.
 --

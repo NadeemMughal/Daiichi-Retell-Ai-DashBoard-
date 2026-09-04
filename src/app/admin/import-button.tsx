@@ -4,11 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-// Supabase Cron owns synchronization (supabase/cron/setup_agent_import.sql). An open
-// operations page reconciles on the same cadence as a fallback, so agents created or
-// deleted in Retell still appear while an operator is watching even if the scheduled
-// job has not been installed yet.
-const FALLBACK_SYNC_MS = 5 * 60_000;
+// The schedule in vercel.json owns unattended synchronization. While an operator
+// is watching, the page ticks on the same throttled endpoint the client
+// dashboards use, so an agent created or deleted in Retell shows up here within
+// the interval rather than at the next scheduled run.
+const DASHBOARD_TICK_MS = 30_000;
 const STALE_AFTER_MS = 15 * 60_000;
 
 export function ImportButton({ lastSyncedAt }: { lastSyncedAt: string | null }) {
@@ -50,11 +50,24 @@ export function ImportButton({ lastSyncedAt }: { lastSyncedAt: string | null }) 
   }, []);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void run();
-    }, FALLBACK_SYNC_MS);
+    let ticking = false;
+    // The shared endpoint throttles itself, so this costs one reconciliation per
+    // interval no matter how many operators and clients are watching at once.
+    const tick = async () => {
+      if (document.visibilityState !== "visible" || ticking || running.current) return;
+      ticking = true;
+      try {
+        await fetch("/api/dashboard/sync", { method: "POST", cache: "no-store" });
+      } catch {
+        // A tick that cannot reach the server must not stop the next one.
+      } finally {
+        ticking = false;
+        router.refresh();
+      }
+    };
+    const timer = window.setInterval(() => { void tick(); }, DASHBOARD_TICK_MS);
     return () => window.clearInterval(timer);
-  }, [run]);
+  }, [router]);
 
   const syncedAt = [manualSyncedAt, lastSyncedAt].filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
   const syncedMs = syncedAt ? Date.parse(syncedAt) : null;

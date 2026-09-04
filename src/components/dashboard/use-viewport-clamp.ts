@@ -43,11 +43,13 @@ export function useViewportClamp<T extends HTMLElement>(open: boolean, gutter = 
       let desiredLeft = rect.left;
       if (desiredLeft + rect.width > viewportWidth - gutter) desiredLeft = viewportWidth - gutter - rect.width;
       if (desiredLeft < gutter) desiredLeft = gutter;
-      if (Math.abs(desiredLeft - rect.left) >= 1) {
-        const origin = node.offsetParent?.getBoundingClientRect().left ?? 0;
-        node.style.right = "auto";
-        node.style.left = `${Math.round(desiredLeft - origin)}px`;
-      }
+      // Written every time rather than only when the measurement moved. A panel
+      // that switches between a viewport-anchored mobile layout and a
+      // trigger-anchored one at sm can be measured in the layout it is leaving,
+      // and skipping the write leaves the stale anchor in place.
+      const origin = node.offsetParent?.getBoundingClientRect().left ?? 0;
+      node.style.right = "auto";
+      node.style.left = `${Math.round(desiredLeft - origin)}px`;
 
       rect = node.getBoundingClientRect();
       const anchor = node.offsetParent?.getBoundingClientRect();

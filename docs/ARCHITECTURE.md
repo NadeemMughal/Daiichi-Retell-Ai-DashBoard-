@@ -23,13 +23,29 @@ The first release records manual invoice references and authoritative server-cal
 
 ## Scheduled synchronization
 
-Supabase Cron is the only scheduler. `supabase/cron/setup_agent_import.sql` runs the
-Retell reconciliation and `supabase/cron/setup_process_webhooks.sql` drains the webhook
-inbox; both authenticate with `CRON_SECRET` and share the same two vault secrets.
-`vercel.json` declares no cron jobs, because Vercel Hobby only supports daily schedules
-and a second scheduler would duplicate a 3000-record provider read. The operations page
-refreshes its own view every minute but no longer triggers a provider import, so a full
-sync happens on exactly one clock.
+Synchronization runs on three clocks, each covering a case the others cannot.
+
+`vercel.json` declares both scheduled jobs and is the unattended baseline: it needs no
+database password, no vault secret and no manual SQL, so it works from the moment the
+project deploys. `supabase/cron/setup_agent_import.sql` and
+`supabase/cron/setup_process_webhooks.sql` do the same work from Supabase Cron and remain
+the option for deployments that are not on Vercel. **Install one or the other, not both** —
+they duplicate a 3000-record provider read. Both authenticate with `CRON_SECRET`.
+
+Every open dashboard, client and operator alike, ticks `POST /api/dashboard/sync` every 30
+seconds. That endpoint claims the run with a conditional update on
+`retell_connections.last_sync_at` before doing any work, so the reconciliation happens once
+per interval no matter how many people are watching, and a caller cannot force it to run
+more often by asking more often. This is what keeps a record created in Retell visible
+within half a minute rather than at the next scheduled run. Because a reconciliation reads
+up to 1000 calls, chats and contacts, raising the frequency has a real provider cost;
+`DASHBOARD_SYNC_INTERVAL_MS` and `DASHBOARD_TICK_MS` are the two constants to change
+together.
+
+Pressing **Sync Retell data** bypasses the interval entirely and reconciles immediately.
+A run writes `dashboard_refresh_signals` for every tenant whose agents, calls or chats
+changed, and each dashboard subscribes to that table over Supabase Realtime, so other
+people's screens update as soon as the run finishes instead of on their next tick.
 
 Each successful run records a `reconciliation_runs` row: the window reconciled, calls and
 chats seen, and a difference count covering provider records whose agent this workspace
@@ -93,3 +109,33 @@ Reviewed and deliberately unfinished, so a reader does not mistake these for liv
 `docs/Daiichi-User-Roles-and-Access-Control-Report.pdf` and `docs/build_access_report.py`
 describe the earlier per-role permission model. `permissions.ts` has since collapsed that
 into three effective roles, so treat the report as historical.
+
+## Session export columns
+
+The call and chat history export writes every column from stored data. Eight of them used
+to be literal em dashes because the reconciliation never persisted the value even though
+Retell returns it on the call payload: end-to-end latency, summary, the four post-call
+custom analysis fields, the caller endpoints, and the agent version. `0011_session_export_fields.sql`
+adds the columns and both the reconciliation and the webhook processor now fill them.
+
+`calls.direction` previously held the channel for web calls, so "Channel Type" and
+"Direction" exported the same value and neither was the caller direction. `call_type` now
+holds the channel, `direction` holds inbound/outbound and is null where the channel never
+had one, and the migration backfills existing rows. Loaders read the channel from either
+column so rows written before the migration still report correctly.
+
+`from_number` and `to_number` carry the same sensitivity as `contact_unmasked`: the
+reconciliation only stores them when the tenant has contact masking switched off, and the
+grant is revoked from `anon` and `authenticated` so they are reachable only through the
+service role.
+
+The file itself is written with a UTF-8 byte order mark, CRLF line endings and RFC 4180
+quoting. Without the mark Excel reads the file as Windows-1252 and every em dash arrives as
+mojibake, which is what "—" looked like as "â€"" in exported reports. Cells whose text
+begins with `=`, `@`, `+` or `-` are prefixed with an apostrophe so a spreadsheet does not
+evaluate what a caller said as a formula; values that are only digits and separators are
+left alone so phone numbers keep their leading `+`.
+
+A dashboard select names the columns 0011 adds and falls back to the columns that have
+always existed when the database answers 42703, so an unapplied migration costs those
+columns rather than blanking the page.

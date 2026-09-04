@@ -1,3 +1,7 @@
+-- NOTE: vercel.json also declares this job. Install this script only if the
+-- deployment is not on Vercel, or remove the crons from vercel.json first.
+-- Running both duplicates a 3000-record read against Retell every five minutes.
+
 -- Scheduled Retell reconciliation.
 --
 -- Discovers agents created or deleted in the Daiichi Technologies Retell

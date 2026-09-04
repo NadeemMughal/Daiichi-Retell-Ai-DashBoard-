@@ -85,7 +85,7 @@ export function SessionHistoryView({ kind, calls, chats, agents: agentOptions, c
       successful: /success|book|resolved|qualified|completed/i.test(call.outcome), outcome: call.outcome,
       latency: call.latencyMs == null ? DASH : `${Math.round(call.latencyMs)} ms`, summary: call.summary ?? DASH,
       leadName: custom.lead_name ?? DASH, leadContact: custom.lead_contact ?? DASH, serviceInterest: custom.service_interest ?? DASH, appointmentOutcome: custom.appointment_outcome ?? DASH,
-      from: endpoint(call.fromNumber), to: endpoint(call.toNumber), direction: call.direction ?? DASH
+      from: endpoint(call.fromNumber), to: call.toNumber ?? DASH, direction: call.direction ?? DASH
     };
   }) : chats.map((chat) => {
     const directoryEntry = agentDirectory.get(chat.agentId ?? "");
@@ -222,10 +222,14 @@ function exportTimestamp(row: Row) {
 
 // Spreadsheets read a leading =, +, - or @ as the start of a formula, and the
 // text in these cells comes from what a caller said. The apostrophe keeps the
-// value visible while stopping it from being evaluated.
+// value visible while stopping it from being evaluated. A phone number also
+// starts with +, so anything that is only digits and separators is left alone
+// rather than exported as '+92 555 1234.
+const formulaLead = /^[=@+\-]/;
+const plainNumber = /^[+\-]?[\d\s()./\-•]+$/;
 function csvCell(value: string) {
   const text = String(value ?? "");
-  const guarded = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  const guarded = formulaLead.test(text) && !plainNumber.test(text) ? `'${text}` : text;
   return `"${guarded.replace(/"/g, '""')}"`;
 }
 
