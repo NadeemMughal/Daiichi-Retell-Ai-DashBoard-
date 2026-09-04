@@ -76,6 +76,15 @@ button:disabled { cursor: not-allowed; }
   backdrop-filter: blur(18px);
 }
 
+/* backdrop-filter makes every card a containing block, so a descendant using
+   position: fixed resolves against the card instead of the viewport. Below the
+   sm breakpoint the date range panel and other sheets rely on being pinned to
+   the viewport, so the blur is dropped there. It is decorative, and skipping it
+   also removes an expensive paint on phones. */
+@media (max-width: 639px) {
+  .glass { backdrop-filter: none; }
+}
+
 /* History and contact filter panels must escape their cards instead of being clipped. */
 .glass.min-h-\[520px\] { overflow: visible; }
 
